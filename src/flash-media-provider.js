@@ -2,7 +2,7 @@
 
 var swfobject = require('swfobject');
 var Promise = require('promise-polyfill');
-var uuid_v1 = require('uuid/v1');
+const { v1: uuid_v1 } = require('uuid');
 var connections = {};
 var flashScope;
 var swfLocation = "media-provider.swf";
@@ -41,6 +41,11 @@ var createConnection = function(options) {
         var authToken = options.authToken;
         var display = options.display || options.localDisplay;
         var flashBufferTime = options.flashBufferTime || 0;
+
+        // Set connection logger #WCS-2434
+        if (options.logger) {
+            logger = options.logger;
+        }
 
         var url = getConnectionUrl(options.mainUrl, options.flashProto, options.flashPort);
 

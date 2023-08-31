@@ -1,10 +1,14 @@
 var SESSION_STATUS = Flashphoner.constants.SESSION_STATUS;
 var STREAM_STATUS = Flashphoner.constants.STREAM_STATUS;
+var STREAM_EVENT = Flashphoner.constants.STREAM_EVENT;
+var STREAM_EVENT_TYPE = Flashphoner.constants.STREAM_EVENT_TYPE;
 var CONNECTION_QUALITY = Flashphoner.constants.CONNECTION_QUALITY;
 var MEDIA_DEVICE_KIND = Flashphoner.constants.MEDIA_DEVICE_KIND;
 var TRANSPORT_TYPE = Flashphoner.constants.TRANSPORT_TYPE;
+var CONTENT_HINT_TYPE = Flashphoner.constants.CONTENT_HINT_TYPE;
 var CONNECTION_QUALITY_UPDATE_TIMEOUT_MS = 10000;
 var preloaderUrl = "../../dependencies/media/preloader.mp4";
+var Browser = Flashphoner.Browser;
 var STAT_INTERVAL = 1000;
 var localVideo;
 var remoteVideo;
@@ -13,8 +17,9 @@ var previewStream;
 var publishStream;
 var currentVolumeValue = 50;
 var currentGainValue = 50;
-var statsIntervalID;
-var intervalID;
+var publishStatsIntervalID;
+var playStatsIntervalID;
+var speechIntervalID;
 var extensionId = "nlbaajplpmleofphigmgaifhoikjmbkg";
 var videoBytesSent = 0;
 var audioBytesSent = 0;
@@ -22,6 +27,13 @@ var videoBytesReceived = 0;
 var audioBytesReceived = 0;
 var playConnectionQualityStat = {};
 var publishConnectionQualityStat = {};
+// Speech detection parameters using incoming audio stats in Chrome #WCS-3290
+var statSpeechDetector = {
+    clipping: false,
+    lastClip: 0,
+    threshold: 0.010,
+    latency: 750
+};
 
 try {
     var audioContext = new (window.AudioContext || window.webkitAudioContext)();
@@ -36,15 +48,7 @@ function init_page() {
     try {
         Flashphoner.init({
             screenSharingExtensionId: extensionId,
-            flashMediaProviderSwfLocation: '../../../../media-provider.swf',
             mediaProvidersReadyCallback: function (mediaProviders) {
-                //hide remote video if current media provider is Flash
-                if (mediaProviders[0] == "Flash") {
-                    $("#fecForm").hide();
-                    $("#sendStereoForm").hide();
-                    $("#sendAudioBitrateForm").hide();
-                    $("#cpuOveruseDetectionForm").hide();
-                }
                 if (Flashphoner.isUsingTemasys()) {
                     $("#audioInputForm").hide();
                     $("#videoInputForm").hide();
@@ -52,18 +56,15 @@ function init_page() {
             }
         })
     } catch (e) {
-        $("#notifyFlash").text("Your browser doesn't support Flash or WebRTC technology needed for this example");
+        $("#notifyFlash").text("Your browser doesn't support WebRTC technology needed for this example");
         return;
     }
     //local and remote displays
     localVideo = document.getElementById("localVideo");
     remoteVideo = document.getElementById("remoteVideo");
 
-    if(!Browser.isChrome() && !Browser.isFirefox()) {
+    if(Browser.isAndroid() || Browser.isiOS()) {
         $('#screenShareForm').hide();
-    }
-    if (!Browser.isFirefox()) {
-        $('#mediaSourceForm').hide();
     }
 
     Flashphoner.getMediaDevices(null, true, MEDIA_DEVICE_KIND.OUTPUT).then(function (list) {
@@ -157,9 +158,14 @@ function onStopped() {
     $("#playBtn").prop('disabled', disable);
     $("#playStream").prop('disabled', disable);
     clearStatInfo("in");
-    if (!publishStream && !previewStream) {
-        clearInterval(statsIntervalID);
-        statsIntervalID = null;
+    if (playStatsIntervalID) {
+        clearInterval(playStatsIntervalID);
+        playStatsIntervalID = null;
+    }
+    if (speechIntervalID) {
+        clearInterval(speechIntervalID);
+        speechIntervalID = null;
+        $("#talking").css('background-color', 'red');
     }
     enablePlayToggles(false);
 }
@@ -168,12 +174,6 @@ function playBtnClick() {
     if (validateForm("play")) {
         muteInputs("play");
         $(this).prop('disabled', true);
-        if (Browser.isSafariWebRTC()) {
-            Flashphoner.playFirstVideo(remoteVideo, false, preloaderUrl).then(function() {
-                play();
-            });
-            return;
-        }
         play();
     }
 }
@@ -191,9 +191,9 @@ function onUnpublished() {
     $("#publishBtn").prop('disabled', disable);
     $("#publishStream").prop('disabled', disable);
     clearStatInfo("out");
-    if (!publishStream && !previewStream) {
-        clearInterval(statsIntervalID);
-        statsIntervalID = null;
+    if (publishStatsIntervalID) {
+        clearInterval(publishStatsIntervalID);
+        publishStatsIntervalID = null;
     }
     enablePublishToggles(false);
 }
@@ -202,19 +202,13 @@ function publishBtnClick() {
     if (validateForm("send")) {
         muteInputs("send");
         $(this).prop('disabled', true);
-        if (Browser.isSafariWebRTC()) {
-            Flashphoner.playFirstVideo(localVideo, true, preloaderUrl).then(function() {
-                publish();
-            });
-            return;
-        }
         publish();
     }
 }
 
 function onPublishing(stream) {
-    if (!statsIntervalID) {
-        statsIntervalID = setInterval(loadStats, STAT_INTERVAL);
+    if (!publishStatsIntervalID) {
+        publishStatsIntervalID = setInterval(loadPublishStats, STAT_INTERVAL);
     }
     $('input:radio').attr("disabled", true);
     $("#publishBtn").text("Stop").off('click').click(function () {
@@ -237,22 +231,12 @@ function onPublishing(stream) {
             console.log("Error " + e);
         });
     }).prop('disabled', !($('#sendAudio').is(':checked')));
-    //enableMuteToggles(false);
     stream.setVolume(currentVolumeValue);
-    //intervalID = setInterval(function() {
-    //    previewStream.getStats(function(stat) {
-    //        if (stat.incomingStreams.audio && stat.incomingStreams.audio.audioOutputLevel > 100) {
-    //            $("#talking").css('background-color', 'green');
-    //        } else {
-    //            $("#talking").css('background-color', 'red');
-    //        }
-    //    });
-    //},250);
 }
 
 function onPlaying(stream) {
-    if (!statsIntervalID) {
-        statsIntervalID = setInterval(loadStats, STAT_INTERVAL);
+    if (!playStatsIntervalID) {
+        playStatsIntervalID = setInterval(loadPlayStats, STAT_INTERVAL);
     }
     $("#playBtn").text("Stop").off('click').click(function () {
         $(this).prop('disabled', true);
@@ -260,6 +244,12 @@ function onPlaying(stream) {
     }).prop('disabled', false);
     $("#volumeControl").slider("enable");
     enablePlayToggles(true);
+    if (stream.getAudioState()) {
+        $("#audioMuted").text(stream.getAudioState().muted);
+    }
+    if (stream.getVideoState()) {
+        $("#videoMuted").text(stream.getVideoState().muted);
+    }
 }
 
 function onConnected(session) {
@@ -304,6 +294,7 @@ function play() {
     var streamName = $('#playStream').val();
     var session = Flashphoner.getSessions()[0];
     var transportOutput = $('#transportOutput').val();
+    var mutedName="";
     var constraints = {
         audio: $("#playAudio").is(':checked'),
         video: $("#playVideo").is(':checked')
@@ -346,7 +337,11 @@ function play() {
         //wait for incoming stream
         if (Flashphoner.getMediaProviders()[0] == "WebRTC") {
             setTimeout(function () {
-                detectSpeech(stream);
+                if(Browser.isChrome()) {
+                    detectSpeechChrome(stream);
+                } else {
+                    detectSpeech(stream);
+                }
             }, 3000);
         }
     }).on(STREAM_STATUS.STOPPED, function () {
@@ -357,6 +352,30 @@ function play() {
         onStopped();
     }).on(CONNECTION_QUALITY.UPDATE, function (quality, clientFiltered, serverFiltered) {
         updateChart(quality, clientFiltered, serverFiltered, playConnectionQualityStat);
+    }).on(STREAM_EVENT, function(streamEvent) {
+        if(streamEvent.payload !== undefined) {
+            mutedName=streamEvent.payload.streamName;
+        }
+        switch (streamEvent.type) {
+            case STREAM_EVENT_TYPE.AUDIO_MUTED:
+                $("#audioMuted").text(true);
+                $("#audioMutedStream").text(mutedName);
+                break;
+            case STREAM_EVENT_TYPE.AUDIO_UNMUTED:
+                $("#audioMuted").text(false);
+                $("#audioMutedStream").text(mutedName);
+                break;
+            case STREAM_EVENT_TYPE.VIDEO_MUTED:
+                $("#videoMuted").text(true);
+                $("#videoMutedStream").text(mutedName);
+                break;
+            case STREAM_EVENT_TYPE.VIDEO_UNMUTED:
+                $("#videoMuted").text(false);
+                $("#videoMutedStream").text(mutedName);
+                break;
+
+        }
+        console.log("Received streamEvent ", streamEvent.type);
     });
     previewStream.play();
 }
@@ -388,6 +407,7 @@ function publish() {
     var mediaConnectionConstraints;
     var session = Flashphoner.getSessions()[0];
     var transportInput = $('#transportInput').val();
+    var contentHint = $('#contentHintInput').val();
     var cvo = $("#cvo").is(':checked');
     var strippedCodecs = $("#stripPublishCodecs").val();
 
@@ -410,7 +430,8 @@ function publish() {
         sdpHook: rewriteSdp,
         transport: transportInput,
         cvoExtension: cvo,
-        stripCodecs: strippedCodecs
+        stripCodecs: strippedCodecs,
+        videoContentHint: contentHint
     }).on(STREAM_STATUS.PUBLISHING, function (stream) {
         $("#testBtn").prop('disabled', true);
         var video = document.getElementById(stream.id());
@@ -491,6 +512,7 @@ function rewriteSdp(sdp) {
     }
     return sdp.sdpString;
 }
+
 // UI helpers
 // show connection, or local, or remote stream status
 function setStatus(selector, status, stream) {
@@ -530,6 +552,8 @@ function unmuteInputs(selector) {
         }
     });
 }
+
+
 
 function resizeLocalVideo(event) {
     var requested = constraints.video;
@@ -617,7 +641,7 @@ function switchToScreen() {
     if (publishStream) {
         $('#switchBtn').prop('disabled', true);
         $('#videoInput').prop('disabled', true);
-        publishStream.switchToScreen($('#mediaSource').val()).catch(function () {
+        publishStream.switchToScreen($('#mediaSource').val(), true).catch(function () {
             $("#screenShareToggle").removeAttr("checked");
             $('#switchBtn').prop('disabled', false);
             $('#videoInput').prop('disabled', false);
@@ -692,7 +716,7 @@ function detectSpeech(stream, level, latency) {
     source.connect(processor);
 
     // Check speech every 500 ms
-    intervalID = setInterval(function () {
+    speechIntervalID = setInterval(function () {
         if (processor.isSpeech()) {
             $("#talking").css('background-color', 'green');
         } else {
@@ -712,6 +736,35 @@ function handleAudio(event) {
             this.lastClip = window.performance.now();
         }
     }
+}
+
+// Detect speech using timer in Chrome because both ScriptProcessor and AudioWorklet don't work for incoming streams #WCS-3290
+function detectSpeechChrome(stream, level, latency) {
+    statSpeechDetector.threshold = level || 0.010;
+    statSpeechDetector.latency = latency || 750;
+    statSpeechDetector.clipping = false;
+    statSpeechDetector.lastClip = 0;
+    speechIntervalID = setInterval(function() {
+        stream.getStats(function(stat) {
+            let audioStats = stat.inboundStream.audio;
+            if(!audioStats) {
+                return;
+            }
+            // Using audioLevel WebRTC stats parameter
+            if (audioStats.audioLevel >= statSpeechDetector.threshold) {
+                statSpeechDetector.clipping = true;
+                statSpeechDetector.lastClip = window.performance.now();
+            }
+            if ((statSpeechDetector.lastClip + statSpeechDetector.latency) < window.performance.now()) {
+                statSpeechDetector.clipping = false;
+            }
+            if (statSpeechDetector.clipping) {
+                $("#talking").css('background-color', 'green');
+            } else {
+                $("#talking").css('background-color', 'red');
+            }
+        });
+    },500);
 }
 
 //Ready controls
@@ -809,10 +862,33 @@ function readyControls() {
         option.value = transportType;
         transportOutput.appendChild(option);
     }
+
+    //init content hint form
+    var contentType;
+    var contentTypeValue;
+    var option;
+    var contentHintInput = document.getElementById("contentHintInput");
+    for (contentType in CONTENT_HINT_TYPE) {
+        option = document.createElement("option");
+        switch(contentType) {
+            case 'MOTION':
+                contentTypeValue = CONTENT_HINT_TYPE.MOTION;
+            break;
+            case 'DETAIL':
+                contentTypeValue = CONTENT_HINT_TYPE.DETAIL;
+            break;
+            case 'TEXT':
+                contentTypeValue = CONTENT_HINT_TYPE.TEXT;
+            break;
+        }
+        option.text = contentTypeValue;
+        option.value = contentTypeValue;
+        contentHintInput.appendChild(option);
+    }
 }
 
-// Stat
-function loadStats() {
+// Get WebRTC publishing stats
+function loadPublishStats() {
     if (publishStream) {
         publishStream.getStats(function (stats) {
             if (stats && stats.outboundStream) {
@@ -849,6 +925,10 @@ function loadStats() {
             }
         });
     }
+}
+
+// Get WebRTC playback stats
+function loadPlayStats() {
     if (previewStream) {
         previewStream.getStats(function (stats) {
             if (stats && stats.inboundStream) {
@@ -869,6 +949,10 @@ function loadStats() {
                 }
 
                 if (stats.inboundStream.audio) {
+                    if (stats.inboundStream.audio.audioLevel) {
+                        // Round audio level to 6 decimal places
+                        stats.inboundStream.audio.audioLevel = stats.inboundStream.audio.audioLevel.toFixed(6);
+                    }
                     showStat(stats.inboundStream.audio, "inAudioStat");
                     let aBitrate = (stats.inboundStream.audio.bytesReceived - audioBytesReceived) * 8;
                     if ($('#inAudioStatBitrate').length == 0) {
@@ -885,25 +969,28 @@ function loadStats() {
             }
         });
     }
-    function showStat(stat, type) {
-        Object.keys(stat).forEach(function(key) {
-            if (typeof stat[key] !== 'object') {
-                let k = key.split(/(?=[A-Z])/);
-                let metric = "";
-                for (let i = 0; i < k.length; i++) {
-                    metric += k[i][0].toUpperCase() + k[i].substring(1) + " ";
-                }
-                if ($("#" + key + "-" + type).length == 0) {
-                    let html = "<div style='font-weight: bold'>" + metric.trim() + ": <span id='" + key  + "-" + type + "' style='font-weight: normal'></span>" + "</div>";
-                    // $(html).insertAfter("#" + type);
-                    $("#" + type).append(html);
-                } else {
-                    $("#" + key + "-" + type).text(stat[key]);
-                }
-            }
-        });
-    }
 }
+
+// Helper funcltion to display stats
+function showStat(stat, type) {
+    Object.keys(stat).forEach(function(key) {
+        if (typeof stat[key] !== 'object') {
+            let k = key.split(/(?=[A-Z])/);
+            let metric = "";
+            for (let i = 0; i < k.length; i++) {
+                metric += k[i][0].toUpperCase() + k[i].substring(1) + " ";
+            }
+            if ($("#" + key + "-" + type).length == 0) {
+                let html = "<div style='font-weight: bold'>" + metric.trim() + ": <span id='" + key  + "-" + type + "' style='font-weight: normal'></span>" + "</div>";
+                // $(html).insertAfter("#" + type);
+                $("#" + type).append(html);
+            } else {
+                $("#" + key + "-" + type).text(stat[key]);
+            }
+        }
+    });
+}
+
 
 //Test
 var micLevelInterval;
@@ -937,10 +1024,6 @@ function startTest() {
                     }
                 }
             }
-        } else if (Flashphoner.getMediaProviders()[0] == "Flash") {
-            micLevelInterval = setInterval(function () {
-                $("#micLevel").text(disp.children[0].getMicrophoneLevel());
-            }, 500);
         }
         testStarted = true;
     }).catch(function (error) {

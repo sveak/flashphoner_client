@@ -1,9 +1,10 @@
 'use strict';
 
-var uuid_v1 = require('uuid/v1');
+const { v1: uuid_v1 } = require('uuid');
 var constants = require("./constants");
 var util = require('./util');
-var logger = require('./util').logger;
+var LoggerObject = require('./util').logger;
+var coreLogger;
 var loggerConf = {push: false, severity: "INFO"};
 var Promise = require('promise-polyfill');
 var KalmanFilter = require('kalmanjs');
@@ -16,6 +17,8 @@ var isUsingTemasysPlugin = false;
  */
 
 var SESSION_STATUS = constants.SESSION_STATUS;
+var STREAM_EVENT = constants.STREAM_EVENT;
+var STREAM_EVENT_TYPE = constants.STREAM_EVENT_TYPE;
 var STREAM_STATUS = constants.STREAM_STATUS;
 var CALL_STATUS = constants.CALL_STATUS;
 var TRANSPORT_TYPE = constants.TRANSPORT_TYPE;
@@ -44,7 +47,7 @@ var disableConnectionQualityCalculation;
  * @param {String=} options.decoderLocation Location of video-worker2.js file
  * @param {String=} options.screenSharingExtensionId Chrome screen sharing extension id
  * @param {Object=} options.constraints Default local media constraints
- * @param {Object=} options.logger Enable logging
+ * @param {Object=} options.logger Core logger options
  * @throws {Error} Error if none of MediaProviders available
  * @memberof Flashphoner
  */
@@ -53,12 +56,8 @@ var init = function (options) {
         if (!options) {
             options = {};
         }
-        loggerConf = options.logger || loggerConf;
-        if (options.logger !== null) {
-          loggerConf.enableLogs = true;
-        }
-        // init logger
-        logger.init(loggerConf.severity || "INFO", loggerConf.push || false, loggerConf.customLogger, loggerConf.enableLogs);
+        // init global logger
+        coreLogger = createLogger(options.logger);
         var waitingTemasys = false;
         try {
             var audioContext = new (window.AudioContext || window.webkitAudioContext)();
@@ -69,12 +68,14 @@ var init = function (options) {
         var webRtcProvider = require("./webrtc-media-provider");
         if (webRtcProvider && webRtcProvider.hasOwnProperty('available') && webRtcProvider.available()) {
             MediaProvider.WebRTC = webRtcProvider;
+            // WCS-2996 Fix audio-video out of sync in case of using Samsung browser
+            var enableGainNode = util.Browser.isSamsungBrowser() || util.Browser.isAndroidFirefox() ? false : options.createMicGainNode;
             var webRtcConf = {
                 constraints: options.constraints || getDefaultMediaConstraints(),
                 extensionId: options.screenSharingExtensionId,
                 audioContext: audioContext,
-                logger: logger,
-                createMicGainNode: options.createMicGainNode,
+                logger: coreLogger,
+                createMicGainNode: enableGainNode
             };
             webRtcProvider.configure(webRtcConf);
         } else {
@@ -88,7 +89,7 @@ var init = function (options) {
                         var webRtcConf = {
                             constraints: options.constraints || getDefaultMediaConstraints(),
                             extensionId: options.screenSharingExtensionId,
-                            logger: logger
+                            logger: coreLogger
                         };
                         webRtcProvider.configure(webRtcConf);
 
@@ -107,14 +108,15 @@ var init = function (options) {
             }
         }
 
-        var flashProvider = require("./flash-media-provider");
+        // flashMediaProvider is disables by default due to end of support in the most browsers #WCS-3577
+        var flashProvider = null;
         if (flashProvider && flashProvider.hasOwnProperty('available') && flashProvider.available() &&
             (!MediaProvider.WebRTC || (options.preferredMediaProviders && options.preferredMediaProviders.indexOf("Flash") >= 0))) {
             MediaProvider.Flash = flashProvider;
             var flashConf = {
                 constraints: options.constraints || getDefaultMediaConstraints(),
                 flashMediaProviderSwfLocation: options.flashMediaProviderSwfLocation,
-                logger: logger
+                logger: coreLogger
             };
             flashProvider.configure(flashConf);
         }
@@ -134,7 +136,7 @@ var init = function (options) {
                 receiverLocation: options.receiverLocation,
                 decoderLocation: options.decoderLocation,
                 audioContext: audioContext,
-                logger: logger
+                logger: coreLogger
             };
             websocketProvider.configure(wsConf);
         }
@@ -154,7 +156,7 @@ var init = function (options) {
                     MediaProvider = _MediaProvider;
                 }
             } else {
-                logger.warn(LOG_PREFIX, "Preferred media provider is not available.");
+                corelogger.warn(LOG_PREFIX, "Preferred media provider is not available.");
             }
         }
         if (options.preferredMediaProviders && options.preferredMediaProviders.length > 0) {
@@ -177,7 +179,7 @@ var init = function (options) {
         if (!waitingTemasys && options.mediaProvidersReadyCallback) {
             options.mediaProvidersReadyCallback(Object.keys(MediaProvider));
         }
-        logger.info(LOG_PREFIX, "Initialized");
+        coreLogger.info(LOG_PREFIX, "Initialized");
         initialized = true;
     }
 };
@@ -208,24 +210,23 @@ var playFirstSound = function(noise) {
  *
  * @memberof Flashphoner
  */
-var playFirstVideo = function (display, isLocal, src) {
+var playFirstVideo = function (display, isLocal, src, useControls) {
     for (var mp in MediaProvider) {
-        return MediaProvider[mp].playFirstVideo(display, isLocal, src);
+        return MediaProvider[mp].playFirstVideo(display, isLocal, src, useControls);
     }
 };
 
 /**
- * Get logger
+ * Get core logger
  *
  * @returns {Object} Logger
  * @memberof Flashphoner
  */
-
 var getLogger = function () {
     if (!initialized) {
         console.warn("Initialize API first.");
     } else {
-        return logger;
+        return coreLogger;
     }
 }
 
@@ -384,6 +385,26 @@ var getSession = function (id) {
     return sessions[id];
 };
 
+// Get logger configuration from options
+var getLoggerConf = function(loggerOptions) {
+    var conf = loggerOptions || loggerConf;
+    if (loggerOptions !== null) {
+      conf.enableLogs = true;
+    }
+    return conf;
+}
+
+// Create a new logger object
+var createLogger = function(loggerOptions, parentLogger = coreLogger) {
+    var newLogger = parentLogger;
+    if (newLogger === undefined || loggerOptions != undefined) {
+        var loggerConf = getLoggerConf(loggerOptions);
+        newLogger = new LoggerObject;
+        newLogger.init(loggerConf.severity || "INFO", loggerConf.push || false, loggerConf.customLogger, loggerConf.enableLogs);
+    }
+    return newLogger;
+}
+
 /**
  * Create new session and connect to server.
  *
@@ -399,6 +420,10 @@ var getSession = function (id) {
  * @param {Object=} options.sipOptions Sip configuration
  * @param {Object=} options.mediaOptions Media connection configuration
  * @param {Integer=} options.timeout Connection timeout in milliseconds
+ * @param {Integer=} options.pingInterval Server ping interval in milliseconds [0]
+ * @param {Integer=} options.receiveProbes A maximum subsequental pings received missing count [0]
+ * @param {Integer=} options.probesInterval Interval to check subsequental pings received [0]
+ * @param {Object=} options.logger Session logger options
  * @returns {Session} Created session
  * @throws {Error} Error if API is not initialized
  * @throws {TypeError} Error if options.urlServer is not specified
@@ -413,6 +438,11 @@ var createSession = function (options) {
         throw new TypeError("options.urlServer must be provided");
     }
 
+    // Set session logger #WCS-2434
+    var sessionLogger = createLogger(options.logger)
+    // Override logger for all low level operations
+    var logger = sessionLogger;
+
     var id_ = uuid_v1();
     var sessionStatus = SESSION_STATUS.PENDING;
     var urlServer = options.urlServer;
@@ -423,6 +453,8 @@ var createSession = function (options) {
     var mediaOptions = options.mediaOptions;
     var keepAlive = options.keepAlive;
     var timeout = options.timeout;
+    var wsPingSender = new WSPingSender(options.pingInterval || 0);
+    var wsPingReceiver = new WSPingReceiver(options.receiveProbes || 0, options.probesInterval || 0);
     var connectionTimeout;
 
     var cConfig;
@@ -446,6 +478,8 @@ var createSession = function (options) {
     var streams = {};
     var calls = {};
     var mediaConnections = {};
+    //session to stream event callbacks
+    var streamEventRefreshHandlers = {};
     //session to stream callbacks
     var streamRefreshHandlers = {};
     //session to call callbacks
@@ -507,7 +541,7 @@ var createSession = function (options) {
         if (timeout != undefined && timeout > 0) {
           connectionTimeout = setTimeout(function() {
             if (wsConnection.readyState == 0) {
-              console.log("WS connection timeout");
+              logger.warn(LOG_PREFIX, "WS connection timeout");
               wsConnection.close();
             }
           }, timeout);
@@ -528,7 +562,7 @@ var createSession = function (options) {
                 mediaProviders: Object.keys(MediaProvider),
                 keepAlive: keepAlive,
                 authToken:authToken,
-                clientVersion: "0.5.28",
+                clientVersion: "2.0",
                 clientOSVersion: window.navigator.appVersion,
                 clientBrowserVersion: window.navigator.userAgent,
                 msePacketizationVersion: 2,
@@ -540,6 +574,10 @@ var createSession = function (options) {
             //connect to REST App
             send("connection", cConfig);
             logger.setConnection(wsConnection);
+            // Send ping messages to server to check if connection is still alive #WCS-3410
+            wsPingSender.start();
+            // Check subsequintel pings received from server to check if connection is still alive #WCS-3410
+            wsPingReceiver.start();
         };
         wsConnection.onmessage = function (event) {
             var data = {};
@@ -552,6 +590,7 @@ var createSession = function (options) {
             switch (data.message) {
                 case 'ping':
                     send("pong", null);
+                    wsPingReceiver.success();
                     break;
                 case 'getUserData':
                     authToken = obj.authToken;
@@ -577,6 +616,12 @@ var createSession = function (options) {
                     if (streamRefreshHandlers[obj.mediaSessionId]) {
                         //update stream status
                         streamRefreshHandlers[obj.mediaSessionId](obj);
+                    }
+                    break;
+                case 'notifyStreamEvent':
+                    if (streamEventRefreshHandlers[obj.mediaSessionId]) {
+                        //update stream status
+                        streamEventRefreshHandlers[obj.mediaSessionId](obj);
                     }
                     break;
                 case 'DataStatusEvent':
@@ -642,6 +687,7 @@ var createSession = function (options) {
                     var availableStream = {};
                     availableStream.mediaSessionId = obj.id;
                     availableStream.available = obj.status;
+                    availableStream.reason = obj.info;
                     if (streamRefreshHandlers[availableStream.mediaSessionId]) {
                         streamRefreshHandlers[availableStream.mediaSessionId](availableStream);
                     }
@@ -671,6 +717,10 @@ var createSession = function (options) {
     function onSessionStatusChange(newStatus, obj) {
         sessionStatus = newStatus;
         if (sessionStatus == SESSION_STATUS.DISCONNECTED || sessionStatus == SESSION_STATUS.FAILED) {
+            // Stop pinging server #WCS-3410
+            wsPingSender.stop();
+            // Stop checking pings received #WCS-3410
+            wsPingReceiver.stop();
             //remove streams
             for (var prop in streamRefreshHandlers) {
                 if (streamRefreshHandlers.hasOwnProperty(prop) && typeof streamRefreshHandlers[prop] === 'function') {
@@ -684,6 +734,65 @@ var createSession = function (options) {
             callbacks[sessionStatus](session, obj);
         }
     }
+
+    // Websocket periodic ping sender
+    function WSPingSender(interval) {
+        this.interval = interval || 0;
+        this.intervalId = null;
+        this.start = function() {
+            if (this.interval > 0) {
+                this.intervalId = setInterval(function() {
+                    send("ping", null);
+                }, this.interval);
+            }
+        };
+        this.stop = function() {
+            if (this.intervalId) {
+                clearInterval(this.intervalId);
+            }
+        };
+
+        return(this);
+    }
+
+    // Websocket ping receive prober
+    function WSPingReceiver(receiveProbes, probesInterval) {
+        this.maxPings = receiveProbes || 0;
+        this.interval = probesInterval || 0;
+        this.intervalId = null;
+        this.pingsMissing = 0;
+        this.start = function() {
+            if (this.maxPings > 0 && this.interval > 0) {
+                let receiver = this;
+                this.intervalId = setInterval(function() {
+                    receiver.checkPingsReceived();
+                }, this.interval);
+            }
+        };
+        this.stop = function() {
+            if (this.intervalId) {
+                clearInterval(this.intervalId);
+            }
+            this.pingsMissing = 0;
+        };
+        this.checkPingsReceived = function() {
+            this.pingsMissing++;
+            if (this.pingsMissing >= this.maxPings) {
+                this.failure();
+            }
+        };
+        this.success = function() {
+            this.pingsMissing = 0;
+        };
+        this.failure = function() {
+            logger.info(LOG_PREFIX, "Missing " + this.pingsMissing + " pings from server, connection seems to be down");
+            onSessionStatusChange(SESSION_STATUS.FAILED);
+            wsConnection.close();
+        };
+
+        return(this);
+    }
+
 
     /**
      * @callback sdpHook
@@ -706,9 +815,12 @@ var createSession = function (options) {
      * @param {HTMLElement} options.localVideoDisplay Div element local video should be displayed in
      * @param {HTMLElement} options.remoteVideoDisplay Div element remote video should be displayed in
      * @param {Object=} options.custom User provided custom object that will be available in REST App code
-     * @param {Array<string>=} options.stripCodecs Array of codecs which should be stripped from SDP (WebRTC)
+     * @param {string=} options.stripCodecs Comma separated strings of codecs which should be stripped from WebRTC SDP (ex. "SILK,G722")
      * @param {Array<string>=} options.sipSDP Array of custom SDP params (ex. bandwidth (b=))
      * @param {Array<string>=} options.sipHeaders Array of custom SIP headers
+     * @param {string=} options.videoContentHint Video content hint for browser ('detail' by default to maintain resolution), {@link Flashphoner.constants.CONTENT_HINT_TYPE}
+     * @param {Boolean=} options.useControls Use a standard HTML5 video controls (play, pause, fullscreen). May be a workaround for fullscreen mode to work in Safari 16
+     * @param {Object=} options.logger Call logger options
      * @param {sdpHook} sdpHook The callback that handles sdp from the server
      * @returns {Call} Call
      * @throws {TypeError} Error if no options provided
@@ -719,14 +831,19 @@ var createSession = function (options) {
     var createCall = function (options) {
         //check session state
         if (sessionStatus !== SESSION_STATUS.REGISTERED && sessionStatus !== SESSION_STATUS.ESTABLISHED) {
-            logger.info(LOG_PREFIX, "Status is " + sessionStatus);
-            throw new Error('Invalid session state');
+            throw new Error('Invalid session state ' + sessionStatus);
         }
 
         //check options
         if (!options) {
             throw new TypeError("options must be provided");
         }
+
+        // Set call logger #WCS-2434
+        var callLogger = createLogger(options.logger, sessionLogger);
+        // Override logger for all low level operations
+        var logger = callLogger;
+
         var login = (appKey == 'clickToCallApp') ? '' : cConfig.sipLogin;
         var caller_ = (options.incoming) ? options.caller : login;
         var callee_ = options.callee;
@@ -766,6 +883,8 @@ var createSession = function (options) {
         var sdpHook = options.sdpHook;
         var sipSDP = options.sipSDP;
         var sipHeaders = options.sipHeaders;
+        var videoContentHint = options.videoContentHint;
+        var useControls = options.useControls;
         /**
          * Represents sip call.
          *
@@ -860,7 +979,10 @@ var createSession = function (options) {
                     login: login,
                     constraints: constraints,
                     connectionConfig: mediaOptions,
-                    audioOutputId: audioOutputId
+                    audioOutputId: audioOutputId,
+                    videoContentHint: videoContentHint,
+                    useControls: useControls,
+                    logger: logger
                 }).then(function (newConnection) {
                     mediaConnection = newConnection;
                     return mediaConnection.createOffer({
@@ -943,7 +1065,7 @@ var createSession = function (options) {
          * @param {Boolean=} answerOptions.receiveAudio Receive audio
          * @param {Boolean=} answerOptions.receiveVideo Receive video
          * @param {String=} answerOptions.constraints Answer call with constraints
-         * @param {Array<string>=} answerOptions.stripCodecs Array of codecs which should be stripped from SDP (WebRTC)
+         * @param {String=} answerOptions.stripCodecs Comma separated string of codecs which should be stripped from WebRTC SDP (ex. "SILK,G722")
          * @param {Array<string>=} answerOptions.sipSDP Array of custom SDP params (ex. bandwidth (b=))
          * @param {Array<string>=} answerOptions.sipHeaders Array of custom SIP headers
          * @param {sdpHook} sdpHook The callback that handles sdp from the server
@@ -998,7 +1120,8 @@ var createSession = function (options) {
                     login: cConfig.sipLogin,
                     constraints: constraints,
                     connectionConfig: mediaOptions,
-                    audioOutputId: audioOutputId
+                    audioOutputId: audioOutputId,
+                    useControls: useControls
                 }).then(function (newConnection) {
                     mediaConnection = newConnection;
                     return mediaConnection.setRemoteSdp(sdp);
@@ -1371,7 +1494,7 @@ var createSession = function (options) {
         /**
          * Get call info
          * @returns {string} Info
-         * @memberof Stream
+         * @memberof Call
          * @inner
          */
         var getInfo = function () {
@@ -1381,13 +1504,22 @@ var createSession = function (options) {
         /**
          * Get stream error info
          * @returns {string} Error info
-         * @memberof Stream
+         * @memberof Call
          * @inner
          */
         var getErrorInfo = function () {
             return errorInfo_;
         };
 
+        /**
+         * Get call logger
+         *
+         * @returns {Object} Logger
+         * @memberof Call
+         */
+        var getLogger = function () {
+            return callLogger;
+        };
 
         call.call = call_;
         call.answer = answer;
@@ -1419,6 +1551,7 @@ var createSession = function (options) {
         call.switchMic = switchMic;
         call.switchToScreen = switchToScreen;
         call.switchToCam = switchToCam;
+        call.getLogger = getLogger;
         calls[id_] = call;
         return call;
     };
@@ -1456,7 +1589,7 @@ var createSession = function (options) {
      * @param {HTMLElement} options.display Div element stream should be displayed in
      * @param {Object=} options.custom User provided custom object that will be available in REST App code
      * @param {Integer} [options.flashBufferTime=0] Specifies how long to buffer messages before starting to display the stream (Flash-only)
-     * @param {Array<string>=} options.stripCodecs Array of codecs which should be stripped from SDP (WebRTC)
+     * @param {string=} options.stripCodecs Comma separated string of codecs which should be stripped from WebRTC SDP (ex. "H264,PCMA,PCMU,G722")
      * @param {string=} options.rtmpUrl Rtmp url stream should be forwarded to
      * @param {Object=} options.mediaConnectionConstraints Stream specific constraints for underlying RTCPeerConnection
      * @param {Boolean=} options.flashShowFullScreenButton Show full screen button in flash
@@ -1464,6 +1597,10 @@ var createSession = function (options) {
      * @param {Boolean=} options.cvoExtension Enable rtp video orientation extension
      * @param {Integer=} options.playoutDelay Time delay between network reception of media and playout
      * @param {string=} options.useCanvasMediaStream EXPERIMENTAL: when publish bind browser's media stream to the canvas. It can be useful for image filtering
+     * @param {string=} options.videoContentHint Video content hint for browser ('detail' by default to maintain resolution), {@link Flashphoner.constants.CONTENT_HINT_TYPE}
+     * @param {Boolean=} options.unmutePlayOnStart Unmute playback on start. May be used after user gesture only, so set 'unmutePlayOnStart: false' for autoplay
+     * @param {Boolean=} options.useControls Use a standard HTML5 video controls (play, pause, fullscreen). May be a workaround for fullscreen mode to work in Safari 16
+     * @param {Object=} options.logger Stream logger options
      * @param {sdpHook} sdpHook The callback that handles sdp from the server
      * @returns {Stream} Stream
      * @throws {TypeError} Error if no options provided
@@ -1478,7 +1615,7 @@ var createSession = function (options) {
         var availableCallbacks = [];
         //check session state
         if (sessionStatus !== SESSION_STATUS.ESTABLISHED) {
-            throw new Error('Invalid session state');
+            throw new Error('Invalid session state ' + sessionStatus);
         }
 
         //check options
@@ -1488,6 +1625,11 @@ var createSession = function (options) {
         if (!options.name) {
             throw new TypeError("options.name must be provided");
         }
+
+        // Set stream logger #WCS-2434
+        var streamLogger = createLogger(options.logger, sessionLogger);
+        // Override logger for all low level operations
+        var logger = streamLogger;
 
         var clientKf = new KalmanFilter();
         var serverKf = new KalmanFilter();
@@ -1566,6 +1708,12 @@ var createSession = function (options) {
         var callbacks = {};
         var playoutDelay = options.playoutDelay;
         var useCanvasMediaStream = options.useCanvasMediaStream;
+        var videoContentHint = options.videoContentHint;
+        var unmutePlayOnStart = options.unmutePlayOnStart;
+        var useControls = options.useControls;
+
+        var audioState_;
+        var videoState_;
 
         var connectionQuality;
 
@@ -1578,6 +1726,21 @@ var createSession = function (options) {
          * @see Session~createStream
          */
         var stream = {};
+
+        streamEventRefreshHandlers[id_] = function (streamEvent) {
+            if (streamEvent.type == STREAM_EVENT_TYPE.NOT_ENOUGH_BANDWIDTH) {
+                var info = streamEvent.payload.info.split("/");
+                remoteBitrate = info[0];
+                networkBandwidth = info[1];
+            } else if (streamEvent.type == STREAM_EVENT_TYPE.RESIZE) {
+                resolution.width = streamEvent.payload.streamerVideoWidth;
+                resolution.height = streamEvent.payload.streamerVideoHeight;
+            }
+            if (callbacks[STREAM_EVENT]) {
+                callbacks[STREAM_EVENT](streamEvent);
+            }
+        }
+
         streamRefreshHandlers[id_] = function (streamInfo, sdp) {
             //set remote sdp
             if (sdp && sdp !== '') {
@@ -1591,6 +1754,7 @@ var createSession = function (options) {
 
             if (streamInfo.available != undefined) {
                 for (var i = 0; i < availableCallbacks.length; i++) {
+                    info_ = streamInfo.reason;
                     if (streamInfo.available == "true") {
                         availableCallbacks[i].resolve(stream);
                     } else {
@@ -1602,12 +1766,13 @@ var createSession = function (options) {
             }
 
             var event = streamInfo.status;
-            
+
             if (event == INBOUND_VIDEO_RATE || event == OUTBOUND_VIDEO_RATE) {
                 detectConnectionQuality(event, streamInfo);
                 return;
             }
 
+            //Depricated. WCS-3228: RESIZE, SNAPSHOT_COMPLETE and NOT_ENOUGH_BANDWIDTH moved to STREAM_EVENT
             if (event == STREAM_STATUS.RESIZE) {
                 resolution.width = streamInfo.streamerVideoWidth;
                 resolution.height = streamInfo.streamerVideoHeight;
@@ -1621,6 +1786,9 @@ var createSession = function (options) {
                 status_ = event;
             }
 
+            audioState_ = streamInfo.audioState;
+            videoState_ = streamInfo.videoState;
+
             if (streamInfo.info)
                 info_ = streamInfo.info;
 
@@ -1630,6 +1798,7 @@ var createSession = function (options) {
 
                 delete streams[id_];
                 delete streamRefreshHandlers[id_];
+                delete streamEventRefreshHandlers[id_];
                 if (mediaConnection) {
                     mediaConnection.close(cacheLocalResources);
                 }
@@ -1708,7 +1877,7 @@ var createSession = function (options) {
         var play = function () {
             logger.debug(LOG_PREFIX, "Play stream " + name_);
             if (status_ !== STREAM_STATUS.NEW) {
-                throw new Error("Invalid stream state");
+                throw new Error("Invalid stream state " + status_);
             }
             status_ = STREAM_STATUS.PENDING;
             //create mediaProvider connection
@@ -1725,7 +1894,10 @@ var createSession = function (options) {
                 connectionConstraints: mediaConnectionConstraints,
                 audioOutputId: audioOutputId,
                 remoteVideo: remoteVideo,
-                playoutDelay: playoutDelay
+                playoutDelay: playoutDelay,
+                unmutePlayOnStart: unmutePlayOnStart,
+                useControls: useControls,
+                logger: logger
             }, streamRefreshHandlers[id_]).then(function (newConnection) {
                 mediaConnection = newConnection;
                 try {
@@ -1782,7 +1954,7 @@ var createSession = function (options) {
         var publish = function () {
             logger.debug(LOG_PREFIX, "Publish stream " + name_);
             if (status_ !== STREAM_STATUS.NEW) {
-                throw new Error("Invalid stream state");
+                throw new Error("Invalid stream state " + status_);
             }
             status_ = STREAM_STATUS.PENDING;
             published_ = true;
@@ -1812,7 +1984,10 @@ var createSession = function (options) {
                     constraints: constraints,
                     connectionConfig: mediaOptions,
                     connectionConstraints: mediaConnectionConstraints,
-                    customStream: constraints && constraints.customStream ? constraints.customStream : false
+                    customStream: constraints && constraints.customStream ? constraints.customStream : false,
+                    videoContentHint: videoContentHint,
+                    useControls: useControls,
+                    logger: logger
                 }).then(function (newConnection) {
                     mediaConnection = newConnection;
                     return mediaConnection.createOffer({
@@ -1915,6 +2090,23 @@ var createSession = function (options) {
             }
             mediaConnection.switchToCam();
         };
+
+
+        /**
+         * Send data from published stream.
+         *
+         * @param {Object} payload Any object
+         * @throws {Error} Error if stream status is not {@link Flashphoner.constants.STREAM_STATUS.PUBLISHING}
+         * @memberof Stream
+         * @inner
+         */
+        var sendData = function (payload) {
+            if(status_ !== STREAM_STATUS.PUBLISHING){
+                throw new Error('Invalid stream state');
+            }
+            sendStreamEvent(STREAM_EVENT_TYPE.DATA, payload);
+        };
+
 
         /**
          * Unmute remote audio
@@ -2164,6 +2356,14 @@ var createSession = function (options) {
             return -1;
         };
 
+        function sendStreamEvent(type, payload) {
+            send("sendStreamEvent", {
+                mediaSessionId: id_,
+                type: type,
+                payload: payload
+            });
+        }
+
         /**
          * Mute outgoing audio
          *
@@ -2173,6 +2373,7 @@ var createSession = function (options) {
         var muteAudio = function () {
             if (mediaConnection) {
                 mediaConnection.muteAudio();
+                sendStreamEvent(STREAM_EVENT_TYPE.AUDIO_MUTED);
             }
         };
 
@@ -2185,6 +2386,7 @@ var createSession = function (options) {
         var unmuteAudio = function () {
             if (mediaConnection) {
                 mediaConnection.unmuteAudio();
+                sendStreamEvent(STREAM_EVENT_TYPE.AUDIO_UNMUTED);
             }
         };
 
@@ -2211,6 +2413,7 @@ var createSession = function (options) {
         var muteVideo = function () {
             if (mediaConnection) {
                 mediaConnection.muteVideo();
+                sendStreamEvent(STREAM_EVENT_TYPE.VIDEO_MUTED);
             }
         };
 
@@ -2223,6 +2426,8 @@ var createSession = function (options) {
         var unmuteVideo = function () {
             if (mediaConnection) {
                 mediaConnection.unmuteVideo();
+                sendStreamEvent(STREAM_EVENT_TYPE.VIDEO_UNMUTED);
+
             }
         };
 
@@ -2278,6 +2483,27 @@ var createSession = function (options) {
         };
 
         /**
+         * Get audio state (muted)
+         *
+         * @returns AudioState
+         * @memberof Stream
+         * @inner
+         */
+        var getAudioState = function () {
+            return audioState_;
+        };
+
+        /**
+         * Get video state (muted)
+         *
+         * @returns VideoState
+         * @memberof Stream
+         * @inner
+         */
+        var getVideoState = function () {
+            return videoState_;
+        };
+        /**
          * Request full screen for player stream
          * @memberof Stream
          * @inner
@@ -2292,14 +2518,14 @@ var createSession = function (options) {
         };
 
         /**
-         * Stream event callback.
+         * Stream status event callback.
          *
          * @callback Stream~eventCallback
          * @param {Stream} stream Stream that corresponds to the event
          */
 
         /**
-         * Add stream event callback.
+         * Add stream status event callback.
          *
          * @param {string} event One of {@link Flashphoner.constants.STREAM_STATUS} events
          * @param {Stream~eventCallback} callback Callback function
@@ -2340,6 +2566,16 @@ var createSession = function (options) {
             });
         };
 
+        /**
+         * Get stream logger
+         *
+         * @returns {Object} Logger
+         * @memberof Stream
+         */
+        var getLogger = function () {
+            return streamLogger;
+        };
+
         stream.play = play;
         stream.publish = publish;
         stream.stop = stop;
@@ -2366,6 +2602,8 @@ var createSession = function (options) {
         stream.isVideoMuted = isVideoMuted;
         stream.getStats = getStats;
         stream.snapshot = snapshot;
+        stream.getAudioState = getAudioState;
+        stream.getVideoState = getVideoState;
         stream.getNetworkBandwidth = getNetworkBandwidth;
         stream.getRemoteBitrate = getRemoteBitrate;
         stream.fullScreen = fullScreen;
@@ -2375,6 +2613,8 @@ var createSession = function (options) {
         stream.switchMic = switchMic;
         stream.switchToScreen = switchToScreen;
         stream.switchToCam = switchToCam;
+        stream.sendData = sendData;
+        stream.getLogger = getLogger;
 
         streams[id_] = stream;
         return stream;
@@ -2565,6 +2805,16 @@ var createSession = function (options) {
         return sdp;
     }
 
+    /**
+     * Get session logger
+     *
+     * @returns {Object} Logger
+     * @memberof Session
+    */
+    var getLogger = function () {
+        return sessionLogger;
+    };
+
     //export Session
     session.id = id;
     session.status = status;
@@ -2579,6 +2829,7 @@ var createSession = function (options) {
     session.startDebug = startDebug;
     session.stopDebug = stopDebug;
     session.on = on;
+    session.getLogger = getLogger;
 
     //save interface to global map
     sessions[id_] = session;
@@ -2602,11 +2853,11 @@ module.exports = {
     playFirstSound: playFirstSound,
     playFirstVideo: playFirstVideo,
     getLogger: getLogger,
-    roomApi: require('./room-module'),
     constants: constants,
     /**
      * The Screensharing whitelist is no longer needed to share your screen or windows starting Firefox 52
      * https://wiki.mozilla.org/Screensharing
      */
-    firefoxScreenSharingExtensionInstalled: true
+    firefoxScreenSharingExtensionInstalled: true,
+    Browser: util.Browser
 };

@@ -1,7 +1,7 @@
 'use strict';
 
 var webrtcAdapter = require('webrtc-adapter');
-var uuid = require('uuid/v1');
+const { v1: uuid_v1 } = require('uuid');
 var util = require('./util');
 var connections = {};
 var CACHED_INSTANCE_POSTFIX = "-CACHED_WEBRTC_INSTANCE";
@@ -13,6 +13,11 @@ var Promise = require('es6-promise').Promise;
 
 var createConnection = function (options) {
     return new Promise(function (resolve, reject) {
+        // Set connection logger #WCS-2434
+        if (options.logger) {
+            logger = options.logger;
+        }
+
         var id = options.id;
         var connectionConfig = options.connectionConfig || {"iceServers": []};
         var connection = new RTCPeerConnection(connectionConfig, {

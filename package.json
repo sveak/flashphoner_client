@@ -3,19 +3,20 @@
   "version": "2.0.1",
   "description": "UnOfficial Flashphoner WebCallServer WebSDK package",
   "main": "./src/flashphoner-core.js",
+  "types": "./src/flashphoner-core.d.ts",
   "scripts": {
     "build": "cross-env FLEX_HOME='./.extra/flex_sdk_4.6' grunt release",
     "clean": "grunt clean:release",
     "flex_sdk": "(mkdir .extra; cd .extra; wget http://download.macromedia.com/pub/flex/sdk/flex_sdk_4.6.zip; unzip flex_sdk_4.6.zip -d flex_sdk_4.6; rm flex_sdk_4.6.zip)"
   },
   "dependencies": {
-    "adapterjs": "0.14.3",
+    "adapterjs": "0.15.5",
     "es6-promise": "4.0.5",
+    "kalmanjs": "^1.1.0",
     "promise-polyfill": "^6.0.1",
     "swfobject": "^2.2.1",
-    "uuid": "^3.1.0",
-    "webrtc-adapter": "^7.2.6",
-    "kalmanjs": "^1.1.0"
+    "uuid": "^8.3.0",
+    "webrtc-adapter": "^7.2.6"
   },
   "devDependencies": {
     "@babel/core": "^7.4.3",

@@ -1,6 +1,7 @@
 var SESSION_STATUS = Flashphoner.constants.SESSION_STATUS; 
 var CALL_STATUS = Flashphoner.constants.CALL_STATUS;
 var PRELOADER_URL = "../../dependencies/media/preloader.mp4";
+var Browser = Flashphoner.Browser;
 var localDisplay;
 var remoteDisplay;
 var currentCall;
@@ -22,9 +23,9 @@ function loadCallControls(){
 function init_page(){
 	//init api
     try {
-        Flashphoner.init({flashMediaProviderSwfLocation: '../../../../media-provider.swf'});
+        Flashphoner.init();
     } catch(e) {
-        $("#notifyFlash").text("Your browser doesn't support Flash or WebRTC technology needed for this example");
+        $("#notifyFlash").text("Your browser doesn't support WebRTC technology needed for this example");
         return;
     }
 	
@@ -78,18 +79,15 @@ function createSession(authToken) {
         registerRequired: registerRequired
     };
 
+    var connectionOptions = {
+        urlServer: url,
+        keepAlive: true
+    };
+
     if (authToken) {
-        connectionOptions = {
-            urlServer: url,
-            authToken: authToken,
-            keepAlive: true
-        };
+        connectionOptions.authToken = authToken;
     } else {
-        connectionOptions = {
-            urlServer: url,
-            sipOptions: sipOptions,
-            keepAlive: false
-        };
+        connectionOptions.sipOptions = sipOptions;
     }
 
     //create session

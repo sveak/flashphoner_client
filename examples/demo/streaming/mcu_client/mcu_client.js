@@ -1,6 +1,7 @@
 var SESSION_STATUS = Flashphoner.constants.SESSION_STATUS;
 var STREAM_STATUS = Flashphoner.constants.STREAM_STATUS;
 var PRELOADER_URL = "../../dependencies/media/preloader.mp4";
+var Browser = Flashphoner.Browser;
 var remoteVideo;
 var conferenceStream;
 var publishStream;
@@ -10,11 +11,9 @@ var localDisplay;
 function init_page() {
     //init api
     try {
-        Flashphoner.init({
-            flashMediaProviderSwfLocation: '../../../../media-provider.swf'
-        });
+        Flashphoner.init();
     } catch (e) {
-        $("#notifyFlash").text("Your browser doesn't support Flash or WebRTC technology needed for this example");
+        $("#notifyFlash").text("Your browser doesn't support WebRTC technology needed for this example");
         return;
     }
 
@@ -35,10 +34,6 @@ function init_page() {
             conferenceStream.setVolume(currentVolumeValue);
         }
     }).slider("disable");
-    if (Flashphoner.getMediaProviders()[0] == "Flash") {
-        $("#fullScreen").hide();
-        $("#localVideoContainer").show();
-    }
     onStopped();
 }
 
@@ -82,12 +77,6 @@ function joinBtnClick() {
         $('#url').prop('disabled', true);
         $("#room").prop('disabled', true);
         $("#login").prop('disabled', true);
-        if (Browser.isSafariWebRTC() || Flashphoner.getMediaProviders()[0] === "MSE") {
-            Flashphoner.playFirstVideo(remoteVideo, false, PRELOADER_URL).then(function () {
-                start();
-            });
-            return;
-        }
         start();
     }
 }
