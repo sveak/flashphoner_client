@@ -1,4 +1,4 @@
--'use strict';
+'use strict';
 
 var browserDetails = require('webrtc-adapter').default.browserDetails;
 const { v1: uuid_v1 } = require('uuid');
@@ -167,33 +167,35 @@ var createConnection = function (options) {
                     if (remoteVideo) {
                         var playPromise = remoteVideo.play();
                         if (playPromise) {
-                            playPromise
-                            .then(function() {
-                            // Automatically unmute video if needed #WCS-2425
-                            if (unmutePlayOnStart) {
-                                remoteVideo.muted = false;
-                            }
-                        }).catch(function (e) {
-                            if (validBrowsers.includes(browserDetails.browser)) {
-                                //WCS-1698. fixed autoplay in chromium based browsers
-                                //WCS-2375. fixed autoplay in ios safari
-                                logger.info(LOG_PREFIX, "Autoplay detected! Trying to play a video with a muted sound...");
-                                remoteVideo.muted = true;
+                            playPromise.then(
+                                function () {
+                                    // Automatically unmute video if needed #WCS-2425
+                                    if (unmutePlayOnStart) {
+                                        remoteVideo.muted = false;
+                                    }
+                                },
+                                function () {
+                                    if (validBrowsers.includes(browserDetails.browser)) {
+                                        //WCS-1698. fixed autoplay in chromium based browsers
+                                        //WCS-2375. fixed autoplay in ios safari
+                                        logger.info(LOG_PREFIX, "Autoplay detected! Trying to play a video with a muted sound...");
+                                        remoteVideo.muted = true;
 
-                                var mutedPlayPromise = remoteVideo.play();
-                                if (mutedPlayPromise) {
-                                  mutedPlayPromise.catch(() => {
-                                    logger.info(LOG_PREFIX, "Video auto play is not working!");
-                                  });
-                                }
-                              })
-                            .catch(() => {
-                              remoteVideo.muted = true;
-                              remoteVideo.volume = 0;
-                              remoteVideo.controls = true; // todo
-                              remoteVideo.play();
-                              logger.info(LOG_PREFIX, "Autoplay detected! Trying to play a video with a muted sound...");
-                            });
+                                        var mutedPlayPromise = remoteVideo.play();
+                                        if (mutedPlayPromise) {
+                                            mutedPlayPromise.catch(() => {
+                                                logger.info(LOG_PREFIX, "Video auto play is not working!");
+                                            });
+                                        }
+                                    }
+                                })
+                                .catch(() => {
+                                    remoteVideo.muted = true;
+                                    remoteVideo.volume = 0;
+                                    remoteVideo.controls = true; // todo
+                                    remoteVideo.play();
+                                    logger.info(LOG_PREFIX, "Autoplay detected! Trying to play a video with a muted sound...");
+                                });
                         }
                     }
                 };

@@ -1,6 +1,6 @@
 {
   "name": "@flashphoner/websdk",
-  "version": "2.0.1",
+  "version": "2.0.2",
   "description": "UnOfficial Flashphoner WebCallServer WebSDK package",
   "main": "./src/flashphoner-core.js",
   "types": "./src/flashphoner-core.d.ts",

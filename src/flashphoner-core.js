@@ -562,7 +562,7 @@ var createSession = function (options) {
                 mediaProviders: Object.keys(MediaProvider),
                 keepAlive: keepAlive,
                 authToken:authToken,
-                clientVersion: "2.0",
+                clientVersion: "2.0.2",
                 clientOSVersion: window.navigator.appVersion,
                 clientBrowserVersion: window.navigator.userAgent,
                 msePacketizationVersion: 2,
