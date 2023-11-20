@@ -9,9 +9,9 @@ var PRELOADER_URL = "../../dependencies/media/preloader.mp4";
 function init_page(){
 	//init api
     try {
-        Flashphoner.init();
+        Flashphoner.init({flashMediaProviderSwfLocation: '../../../../media-provider.swf'});
     } catch(e) {
-        $("#notifyFlash").text("Your browser doesn't support WebRTC technology needed for this example");
+        $("#notifyFlash").text("Your browser doesn't support Flash or WebRTC technology needed for this example");
         return;
     }
 	
@@ -42,19 +42,11 @@ function createSession() {
         call(Flashphoner.getSessions()[0]);
     } else {
         var url = $('#urlServer').val();
-        var sipOptions = {
-            login: $('#sipLogin').val(),
-            authenticationName: $('#sipAuthenticationName').val(),
-            password: $('#sipPassword').val(),
-            domain: $('#sipDomain').val(),
-            outboundProxy: $('#sipOutboundProxy').val(),
-            port: $('#sipPort').val(),
-            registerRequired: true
-        };
-    
+        var appKey = "clickToCallApp";
+
         var connectionOptions = {
             urlServer: url,
-            sipOptions: sipOptions
+            appKey: appKey
         };
 
         //create session
@@ -87,8 +79,7 @@ function call(session) {
 		remoteVideoDisplay: remoteDisplay,
 		constraints: constraints,
 		receiveAudio: true,
-        receiveVideo: false,
-        stripCodecs: "SILK"
+        receiveVideo: false
 	}).on(CALL_STATUS.RING, function(){
 		setStatus("Call", CALL_STATUS.RING);
     }).on(CALL_STATUS.ESTABLISHED, function(){
@@ -111,45 +102,15 @@ function call(session) {
 
 function onHangup() {
     $("#callBtn").removeClass("btn-danger").addClass("btn-success").text("Call").off('click').click(function(){
-		if (validate()) {
+		if ($("#urlServer").val() && $("#callee").val) {
 			$(this).prop('disabled', true);
 			$('#urlServer').prop('disabled', true);
 			$('#callee').prop('disabled', true);
-            $("#sipCredentialsBtn").prop('disabled', true);
 			connect();
-		} else {
-		    onSipCredentialsBtnClick();
 		}
     }).prop('disabled', false);
 	$('#urlServer').prop('disabled', false);
     $('#callee').prop('disabled', false);
-    $("#sipCredentialsBtn").off('click').click(function(){
-        onSipCredentialsBtnClick();
-    }).prop('disabled', false);
-    $("#okBtn").off('click').click(function(){
-        onOkBtnClick();
-    }).prop('disabled', false);
-    if (Flashphoner.getSessions().length > 0) {
-        Flashphoner.getSessions()[0].disconnect();
-    }
-}
-
-function onSipCredentialsBtnClick() {
-    var formConnection = document.getElementById("formConnection");
-    if (formConnection.style.display === "none") {
-        formConnection.style.display = "block";
-    }
-    $("#sipCredentialsBtn").prop('disabled', true);
-}
-
-function onOkBtnClick() {
-    if(validateForm("formConnection")) {
-        var formConnection = document.getElementById("formConnection");
-        if (formConnection.style.display !== "none") {
-            formConnection.style.display = "none";
-        }
-        $("#sipCredentialsBtn").prop('disabled', false);
-    }
 }
 
 // Set connection and call status
@@ -165,41 +126,4 @@ function setStatus(prefix, status) {
     } else if (status == "TRYING" || status == "RING") {
         statusField.attr("class","text-primary");
     }
-}
-
-function validateForm(formId) {
-    var valid = true;
-	
-    $('#' + formId + ' :text').each(function(){
-        if(!filledInput($(this)) && valid) {
-			valid = false;
-		}
-    });
-	if(!filledInput($('#' + formId + ' :password')) && valid) {
-		valid = false;
-	}
-	
-    return valid;
-}
-
-function filledInput(input) {
-	var valid = true;
-
-    if (!input.val()) {
-		valid = false;
-        input.closest('.form-group').addClass("has-error");
-    } else {
-        input.closest('.form-group').removeClass("has-error");
-    }
-	
-	return valid;
-}
-
-function validate() {
-    var valid = false;
-
-    if(validateForm("formConnection") && filledInput($("#callee")) && filledInput($('#urlServer'))) {
-       valid = true;
-    }
-    return valid;
 }

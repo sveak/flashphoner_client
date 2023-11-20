@@ -14,33 +14,7 @@ module.exports = function(grunt) {
                         }
                     ]
                 }
-            },
-            enable_flash: {
-                files: {
-                    'src/flashphoner-core.js': 'src/flashphoner-core.js'
-                },
-                options: {
-                    replacements: [
-                        {
-                            pattern: /var flashProvider = null;/,
-                            replacement: 'var flashProvider = require(\"./flash-media-provider\");'
-                        }
-                    ]
-                }
-            },
-            disable_flash: {
-                files: {
-                    'src/flashphoner-core.js': 'src/flashphoner-core.js'
-                },
-                options: {
-                    replacements: [
-                        {
-                            pattern: /require\(\"\.\/flash-media-provider\"\);/,
-                            replacement: 'null;'
-                        }
-                    ]
-                }
-            },
+            }
         },
         flash: {
             options: {
@@ -146,15 +120,6 @@ module.exports = function(grunt) {
                         standalone: 'FlashphonerRestApi'
                     }
                 }
-            },
-            flashphonerGlobalObjectRoomApi: {
-                src: ['./src/room-module.js'],
-                dest: './flashphoner-room-api.js',
-                options: {
-                    browserifyOptions: {
-                        standalone: 'RoomApi'
-                    }
-                }
             }
         },
         //used for resolve https://github.com/Temasys/AdapterJS/issues/238
@@ -178,8 +143,7 @@ module.exports = function(grunt) {
                   './flashphoner-no-flash.min.js': ['./flashphoner-no-flash.js'],
                   './flashphoner-no-wsplayer.min.js': ['./flashphoner-no-wsplayer.js'],
                   './flashphoner-temasys-flash-websocket.min.js':['./flashphoner-temasys-flash-websocket.js'],
-                  './flashphoner-webrtc-only.min.js' : ['./flashphoner-webrtc-only.js'],
-                  './flashphoner-room-api.min.js' : ['./flashphoner-room-api.js'],
+                  './flashphoner-webrtc-only.min.js' : ['./flashphoner-webrtc-only.js']
               }
           }
         },
@@ -211,7 +175,6 @@ module.exports = function(grunt) {
                             'flashphoner-temasys-flash-websocket.min.js',
                             'flashphoner-webrtc-only.min.js',
                             'flashphoner-rest-api.js',
-                            'flashphoner-room-api.js',
                             'media-provider.swf'
                         ],
                         dest: 'release/<%= pkg.name %>-<%= pkg.version %>'
@@ -245,7 +208,6 @@ module.exports = function(grunt) {
                 'flashphoner-no-wsplayer.min.js',
                 'flashphoner-temasys-flash-websocket.min.js',
                 'flashphoner-rest-api.js',
-                'flashphoner-room-api.js',
                 'media-provider.swf',
                 'doc/'
             ],
@@ -269,10 +231,12 @@ module.exports = function(grunt) {
     grunt.registerTask('build', [
         'clean:build',
         'string-replace:version',
-        'string-replace:disable_flash',
+        'flash:release_media_provider',
         'browserify',
         'concat',
         'minify',
+        'flash:release_examples_streaming',
+        'flash:release_examples_chat',
         'jsdoc'
     ]);
     grunt.registerTask('release', [
@@ -281,29 +245,11 @@ module.exports = function(grunt) {
         'copy'
     ]);
     grunt.registerTask('webrtc', [
-        'clean:release',
         'clean:build',
         'string-replace:version',
-        'string-replace:disable_flash',
         'browserify:flashphonerGlobalObjectWebRTCOnly',
         'browserify:flashphonerGlobalObjectRestApi',
-        'browserify:flashphonerGlobalObjectRoomApi',
         'minify',
-        'jsdoc',
-        'copy'
-    ]);
-    grunt.registerTask('with-flash', [
-        'clean:release',
-        'clean:build',
-        'string-replace:version',
-        'string-replace:enable_flash',
-        'flash:release_media_provider',
-        'browserify',
-        'concat',
-        'minify',
-        'flash:release_examples_streaming',
-        'flash:release_examples_chat',
-        'jsdoc',
-        'copy'
+        'jsdoc'
     ]);
 };

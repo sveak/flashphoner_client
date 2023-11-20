@@ -27,11 +27,6 @@ var createConnection = function(options, handlers) {
         var id = options.id;
         var display = options.display;
 
-        // Set connection logger #WCS-2434
-        if (options.logger) {
-            logger = options.logger;
-        }
-
         var canvas = document.createElement("canvas");
         display.appendChild(canvas);
         canvas.id = id;

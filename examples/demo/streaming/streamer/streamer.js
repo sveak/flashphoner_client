@@ -1,7 +1,6 @@
 var SESSION_STATUS = Flashphoner.constants.SESSION_STATUS;
 var STREAM_STATUS = Flashphoner.constants.STREAM_STATUS;
 var PRELOADER_URL = "../../dependencies/media/preloader.mp4";
-var Browser = Flashphoner.Browser;
 var localVideo;
 var remoteVideo;
 
@@ -12,9 +11,9 @@ var remoteVideo;
 function init_page() {
     //init api
     try {
-        Flashphoner.init();
+        Flashphoner.init({flashMediaProviderSwfLocation: '../../../../media-provider.swf'});
     } catch(e) {
-        $("#notifyFlash").text("Your browser doesn't support WebRTC technology needed for this example");
+        $("#notifyFlash").text("Your browser doesn't support Flash or WebRTC technology needed for this example");
         return;
     }
 
@@ -40,6 +39,14 @@ function onStopped() {
 
 function publishBtnClick() {
     $(this).prop('disabled', true);
+    if (Browser.isSafariWebRTC()) {
+        Flashphoner.playFirstVideo(localVideo, true, PRELOADER_URL).then(function() {
+            Flashphoner.playFirstVideo(remoteVideo, false, PRELOADER_URL).then(function() {
+                start();
+            });
+        });
+        return;
+    }
     start();
 }
 

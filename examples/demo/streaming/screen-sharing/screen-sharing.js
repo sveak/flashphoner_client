@@ -1,24 +1,21 @@
 var SESSION_STATUS = Flashphoner.constants.SESSION_STATUS;
 var STREAM_STATUS = Flashphoner.constants.STREAM_STATUS;
-var Browser = Flashphoner.Browser;
 var localVideo;
 var remoteVideo;
 var extensionId = "nlbaajplpmleofphigmgaifhoikjmbkg";
 var extensionNotInstalled;
-
-var askExtension = getUrlParam("askExtension") || false;
 
 function init_page() {
     //init api
     try {
         Flashphoner.init({screenSharingExtensionId: extensionId});
     } catch(e) {
-        $("#notifyFlash").text("Your browser doesn't support WebRTC technology needed for this example");
+        $("#notifyFlash").text("Your browser doesn't support Flash or WebRTC technology needed for this example");
         return;
     }
 
     var interval;
-    if (Browser.isFirefox() && !Browser.isAndroid() && !Browser.isiOS()) {
+    if (Browser.isFirefox()) {
         $("#installExtensionButton").show();
         interval = setInterval(function() {
             if (Flashphoner.firefoxScreenSharingExtensionInstalled) {
@@ -30,26 +27,26 @@ function init_page() {
         }, 500);
 
     } else if (Browser.isChrome() && !Browser.isAndroid() && !Browser.isiOS()) {
+        $('#mediaSourceForm').hide();
         interval = setInterval(function() {
-            try {
-                chrome.runtime.sendMessage(extensionId, {type: "isInstalled"}, function (response) {
-                    if (chrome.runtime.lastError) {         //WCS-2369 - catch runtime.lastError
-                        onExtensionNotFound();
-                    } else {
-                        $("#extension").hide();
-                        onExtensionAvailable();
-                    }
+            chrome.runtime.sendMessage(extensionId, {type: "isInstalled"}, function (response) {
+                if (chrome.runtime.lastError) {         //WCS-2369 - cacth runtime.lastError
+                    (inIframe()) ? $("#installFromMarket").show() : $("#installExtensionButton").show();
                     clearInterval(interval);
-                });
-            } catch (e) {
-                // Catch chrome.runtime.sendMessage undefined exception #WCS-3638
-                console.log("Can't detect screen sharing extension: "+e);
-                onExtensionNotFound();
-                clearInterval(interval);
-            }
+                    onExtensionAvailable();
+                    $('#woChromeExtension').prop('checked', true);
+                    $('#woChromeExtension').prop('disabled', true);
+                    extensionNotInstalled = true;
+                } else {
+                    $("#extension").hide();
+                    clearInterval(interval);
+                    onExtensionAvailable();
+                }
+            });
         }, 500);
     } else if(isSafariMacOS()) {
         $("#extension").hide();
+        $('#mediaSourceForm').hide();
         $('#micInput').hide();
         $('#mic').hide();
         clearInterval(interval);
@@ -88,22 +85,6 @@ function isSafariMacOS() {
     return Browser.isSafari() && !Browser.isAndroid() && !Browser.isiOS();
 }
 
-function onExtensionNotFound() {
-    if (askExtension === true) {
-        if (inIframe()) {
-            $("#installFromMarket").show();
-        } else {
-            $("#installExtensionButton").show();
-        }
-    } else {
-        $("#extension").hide();
-    }
-    onExtensionAvailable();
-    $('#woChromeExtension').prop('checked', true);
-    $('#woChromeExtension').prop('disabled', true);
-    extensionNotInstalled = true;
-}
-
 function onExtensionAvailable() {
     localVideo = document.getElementById("localVideo");
     remoteVideo = document.getElementById("remoteVideo");
@@ -117,6 +98,7 @@ function onStarted(publishStream, previewStream) {
         previewStream.stop();
     }).prop('disabled', false);
     $("#connectBtn").prop('disabled', false);
+    $('#mediaSource').prop('disabled', true);
 }
 
 function onStopped(session) {
@@ -128,6 +110,7 @@ function onStopped(session) {
         }
     }).prop('disabled', false);
     $("#connectBtn").prop('disabled', false);
+    $('#mediaSource').prop('disabled', false);
 }
 
 function onConnected(session) {
@@ -145,6 +128,8 @@ function onConnected(session) {
             session.disconnect();
         }
     }).prop('disabled', false);
+
+    $('#mediaSource').prop('disabled', false);
 }
 
 function onDisconnected() {
@@ -157,6 +142,7 @@ function onDisconnected() {
             connect();
         }
     }).prop('disabled', false);
+    $('#mediaSource').prop('disabled', false);
 }
 
 function connect() {
@@ -210,7 +196,7 @@ function startStreaming(session) {
         constraints.video.withoutExtension = true;
     }
     if (Browser.isFirefox()){
-        constraints.video.mediaSource = "screen";
+        constraints.video.mediaSource = $('#mediaSource').val();
     }
     var options = {
         name: streamName,
