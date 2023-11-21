@@ -51,6 +51,12 @@ var createConnection = function (options) {
         var screenShare = false;
         var playoutDelay = options.playoutDelay;
 
+        if (customStream) {
+            // Process when new tracks added (`addtrack` event doesn't work here!)
+            const orig = customStream.addTrack;
+            customStream.addTrack = (...args) => 
+                (orig.apply(customStream, args), processCustomStream(customStream));
+        }
         if (bidirectional) {
             localVideo = getCacheInstance(localDisplay);
             if (localVideo) {
@@ -652,6 +658,24 @@ var createConnection = function (options) {
             logger.info("Switch to screen");
             screenShare = true;
             resolve();
+        };
+
+        var processCustomStream = function (stream) {
+            connection.getSenders().forEach(function (sender) {
+                if (sender.track.kind === 'video') {
+                    currentVideoTrack = localVideo.srcObject.getVideoTracks()[0];
+                    var newAudioTrack = stream.getVideoTracks()[0];
+                    newAudioTrack.enabled = currentVideoTrack.enabled;
+                    sender.replaceTrack(currentVideoTrack);
+                } else if (sender.track.kind === 'audio') {
+                    currentAudioTrack = localVideo.srcObject.getAudioTracks()[0];
+                    var newAudioTrack = stream.getAudioTracks()[0];
+                    newAudioTrack.enabled = currentAudioTrack.enabled;
+                    sender.replaceTrack(newAudioTrack);
+                }
+            });
+            localVideo.srcObject = stream;
+            logger.info(LOG_PREFIX, "Custom stream update");
         };
 
         var switchToCam = function () {
