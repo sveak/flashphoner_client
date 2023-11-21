@@ -4,6 +4,7 @@ $(document).ready(function () {
 
 function init_page() {
     setURL();
+    loadPlayer();
     $("#callBtn").click(function () {
             var state = $("#callBtn").text();
             $(this).prop('disabled',true);
@@ -25,6 +26,24 @@ function init_page() {
     $("#rtmpStream").val(getCookie("rtmpStream"));
 
     $("#dtmfBtn").prop('disabled',true);
+}
+
+function loadPlayer() {
+    detectFlash();
+    var attributes = {};
+    attributes.id = "player";
+    attributes.name = "player";
+    attributes.styleclass="center-block";
+    var flashvars = {};
+    var pathToSWF = "../../dependencies/rtmp_player/player.swf";
+    var elementId = "player";
+    var params = {};
+    params.menu = "true";
+    params.swliveconnect = "true";
+    params.allowfullscreen = "true";
+    params.allowscriptaccess = "always";
+    params.bgcolor = "#777777";
+    swfobject.embedSWF(pathToSWF, elementId, "350", "400", "11.2.202", "expressInstall.swf", flashvars, params, attributes);
 }
 
 var intervalID;
@@ -141,16 +160,18 @@ function stopCheckStatus() {
         clearInterval(intervalID);
 }
 
-// Show RTMP URL to play in a third party player (VLC, ffplay etc)
+//Call embedded AS3 function (setURLtoFlash)
 function sendDataToPlayer() {
+    var player = document.getElementById("player");
     var host = field("rtmpUrl")
         .replace("localhost", window.location.hostname)
         .replace("127.0.0.1", window.location.hostname);
 
     var rtmpStreamPrefix = "rtmp_";
     var url = host + "/" + rtmpStreamPrefix + field("rtmpStream");
-    $("#player").text(url);
+    player.setURLtoFlash(url);
 }
+
 
 //Get call status by callId in GetCallStatusOrHangupForm
 function getStatus() {
@@ -283,6 +304,26 @@ function setCallStatus(status) {
         $("#dtmfBtn").prop('disabled', true);
     }
 
+}
+
+// Detect Flash
+function detectFlash() {
+    var hasFlash = false;
+    try {
+        var fo = new ActiveXObject('ShockwaveFlash.ShockwaveFlash');
+        if (fo) {
+            hasFlash = true;
+        }
+    } catch (e) {
+        if (navigator.mimeTypes
+            && navigator.mimeTypes['application/x-shockwave-flash'] != undefined
+            && navigator.mimeTypes['application/x-shockwave-flash'].enabledPlugin) {
+            hasFlash = true;
+        }
+    }
+    if (!hasFlash) {
+        $("#player").text("Your browser doesn't support Flash or WebRTC technology needed for this example").css("font-weight", "bold").css("font-size","200%");
+    }
 }
 
 // Check field for empty string

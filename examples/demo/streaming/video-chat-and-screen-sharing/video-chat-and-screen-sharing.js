@@ -1,38 +1,53 @@
-var Flashphoner = RoomApi.sdk;
 var SESSION_STATUS = Flashphoner.constants.SESSION_STATUS;
 var STREAM_STATUS = Flashphoner.constants.STREAM_STATUS;
-var ROOM_EVENT = RoomApi.events;
-var Browser = Flashphoner.Browser;
+var ROOM_EVENT = Flashphoner.roomApi.events;
 var connection;
+var extensionId = "nlbaajplpmleofphigmgaifhoikjmbkg";
 var room_;
 
 //initialize interface
 function init_page() {
     //init api
     try {
-        Flashphoner.init();
+        Flashphoner.init({
+            flashMediaProviderSwfLocation: '../../../../media-provider.swf',
+            screenSharingExtensionId: extensionId
+        });
     } catch(e) {
-        $("#notifyFlash").text("Your browser doesn't support WebRTC technology needed for this example");
+        $("#notifyFlash").text("Your browser doesn't support Flash or WebRTC technology needed for this example");
         return;
     }
-    if(Browser.isAndroid() || Browser.isiOS()) {
-        $("#notify").modal('show');
-        $(':button').each(function(){
-            if ($(this).text() !== "Close" && $(this).text() !== "&times;") {
-                $(this).prop('disabled', true);
+    var interval;
+    if (Browser.isFirefox()) {
+        $("#installExtensionButton").show();
+        interval = setInterval(function() {
+            if (Flashphoner.firefoxScreenSharingExtensionInstalled) {
+                $("#extension").hide();
+                $("#installExtensionButton").hide();
+                clearInterval(interval);
+                onStopSharing();
             }
-        });
-        $(':text').each(function(){
-            $(this).prop('disabled', true);
-        });
-        $(".fp-localVideo").each(function(){
-            $(this).hide();
-        });
+        }, 500);
+
+    } else if (Browser.isChrome()) {
+        interval = setInterval(function() {
+            chrome.runtime.sendMessage(extensionId, {type: "isInstalled"}, function (response) {
+                if (response) {
+                    $("#extension").hide();
+                    clearInterval(interval);
+                    onStopSharing();
+                } else {
+                    (inIframe()) ? $("#installFromMarket").show() : $("#installExtensionButton").show();
+                }
+            });
+        }, 500);
+
+    } else {
+        $("#notify").modal('show');
         return false;
     }
     $("#url").val(setURL());
     onLeft();
-    onStopSharing();
 }
 
 // Screen sharing part
@@ -49,10 +64,6 @@ function onStartSharing(publishStream) {
     }).prop('disabled',false);
 }
 
-function isSafariMacOS() {
-    return Browser.isSafari() && !Browser.isAndroid() && !Browser.isiOS();
-}
-
 function startSharing(room) {
     $("#shareBtn").prop('disabled',true);
     var constraints = {
@@ -60,7 +71,6 @@ function startSharing(room) {
             width: parseInt($('#width').val()),
             height: parseInt($('#height').val()),
             frameRate: parseInt($('#fps').val()),
-            withoutExtension: true
         },
         audio: $("#useMic").prop('checked')
     };
@@ -68,16 +78,12 @@ function startSharing(room) {
     if (Browser.isFirefox()){
         constraints.video.mediaSource = "screen";
     }
-    var options = {
-        name: "screenShare",
+    room.publish({
         display: document.getElementById("preview"),
         constraints: constraints,
+        name: "screenShare",
         cacheLocalResources: false
-    }
-    if (isSafariMacOS()) {
-        options.disableConstraintsNormalization = true;
-    }
-    room.publish(options).on(STREAM_STATUS.FAILED, function (stream) {
+    }).on(STREAM_STATUS.FAILED, function (stream) {
         console.warn("Local stream failed!");
         onStopSharing();
     }).on(STREAM_STATUS.PUBLISHING, function (stream) {
@@ -140,7 +146,6 @@ function onLeft() {
 function start() {
     var url = $('#url').val();
     var username = $('#login').val();
-    var display = document.getElementById("localDisplay");
     if (connection && connection.status() == SESSION_STATUS.ESTABLISHED) {
         //check url and username
         if (connection.getServerUrl() != url || connection.username() != username) {
@@ -152,18 +157,7 @@ function start() {
             return;
         }
     }
-    // Requesting media access before connecting to the server #WCS-3449
-    Flashphoner.getMediaAccess(null, localDisplay).then(function() {
-        createConnection(url, username);
-    }).catch(function(error) {
-        console.error("User not allowed media access: "+error);
-        $("#failedInfo").text("User not allowed media access. Refresh the page");
-        onLeft();
-    });
-}
-
-function createConnection(url, username) {
-    connection = RoomApi.connect({urlServer: url, username: username}).on(SESSION_STATUS.FAILED, function(session){
+    connection = Flashphoner.roomApi.connect({urlServer: url, username: username}).on(SESSION_STATUS.FAILED, function(session){
         setStatus('#status', session.status());
         onLeft();
     }).on(SESSION_STATUS.DISCONNECTED, function(session) {
@@ -391,5 +385,36 @@ function setStatus(selector, status) {
         statusField.attr("class","text-muted");
     } else if (status == "FAILED") {
         statusField.attr("class","text-danger");
+    }
+}
+
+//install extension
+function installExtension() {
+    if (Browser.isChrome()) {
+        chrome.webstore.install();
+    } else if (Browser.isFirefox()) {
+        var params = {
+            "Flashphoner Screen Sharing": { URL: "../../dependencies/screen-sharing/firefox-extension/flashphoner_screen_sharing-0.0.10-fx.xpi",
+                IconURL: "../../dependencies/screen-sharing/firefox-extension/icon.png",
+                Hash: "sha1:96699c6536de455cdc5c7705f5b24fae28931605",
+                toString: function () { return this.URL; }
+            }
+        };
+        InstallTrigger.install(params);
+    }
+}
+
+function installFromMarket() {
+    if (Browser.isChrome()) {
+        var url = "https://chrome.google.com/webstore/detail/flashphoner-screen-sharin/nlbaajplpmleofphigmgaifhoikjmbkg";
+        window.open(url, '_blank');
+    }
+}
+
+function inIframe () {
+    try {
+        return window.self !== window.top;
+    } catch (e) {
+        return true;
     }
 }

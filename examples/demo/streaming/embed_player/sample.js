@@ -27,8 +27,8 @@ function init_page() {
     $("#testBtn").click(function () {
         $("#fp_embed_player").attr('src', "player.html?" +
             "urlServer=" + $("#url").val() + "&" +
-            "streamName=" + encodeURIComponent($("#streamName").val()) + "&" +
-             "mediaProviders=" + getMediaProviders() + "&" +
+            "streamName=" + $("#streamName").val().replace(/&/g,encodeURIComponent("&")) + "&" +
+            "mediaProviders=" + getMediaProviders() + "&" +
             "autoplay=false");
     });
     $("#clipboardBtn").click(function () {
@@ -38,7 +38,7 @@ function init_page() {
     var constructCode = function () {
         var url = getAdminUrl() + "/embed_player?" +
         "urlServer=" + $("#url").val() + "&" +
-            "streamName=" + encodeURIComponent($("#streamName").val()) + "&" +
+        "streamName=" + $("#streamName").val().replace(/&/g,encodeURIComponent("&")) + "&" +
         "mediaProviders=" + getMediaProviders();
         $("#codeTextArea").text("<iframe id='fp_embed_player' src='" + url + "' " +
             "marginwidth='0' marginheight='0' frameborder='0' width='100%' height='100%' scrolling='no' allowfullscreen='allowfullscreen'></iframe>")
@@ -46,12 +46,12 @@ function init_page() {
     $('#url,#streamName').on('input',function () {
         constructCode();
     });
-    $('#WebRTC,#MSE,#WSPlayer').change(function() {
+    $('#WebRTC,#Flash,#MSE,#WSPlayer').change(function() {
         constructCode();
     });
     constructCode();
 
-    // Add dark style to player frame
+    // Подгружаем dark.css по умолчанию
     $('#fp_embed_player').contents().find('html').addClass('dark-style');
     $('.fp-remoteVideo').addClass('dark-style-bg');
 

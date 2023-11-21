@@ -68,7 +68,7 @@ var resolutions = [
 function init_page() {
 
     try {
-        Flashphoner.init();
+        Flashphoner.init({flashMediaProviderSwfLocation: '../../../../media-provider.swf'});
     } catch (e) {
         console.warn(e);
     }
@@ -123,7 +123,7 @@ function startTest() {
     display.style.height = resolutions[i].height+"px";
     resolutionDiv.innerHTML += resolutions[i].standard + " " + resolutions[i].width + "x" + resolutions[i].height;
 
-    if (Flashphoner.Browser.isSafariWebRTC()) {
+    if (Browser.isSafariWebRTC()) {
         Flashphoner.playFirstVideo(display, true);
     }
 

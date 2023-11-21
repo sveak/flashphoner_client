@@ -24,6 +24,7 @@ var mixerStarted = false;
 
 function init_page() {
     setURL();
+    loadPlayer();
     bindClickFunctions();
 
     // Set fields using cookies
@@ -644,6 +645,26 @@ function setCallStatus(status) {
 }
 
 
+// Detect Flash
+function detectFlash() {
+    var hasFlash = false;
+    try {
+        var fo = new ActiveXObject('ShockwaveFlash.ShockwaveFlash');
+        if (fo) {
+            hasFlash = true;
+        }
+    } catch (e) {
+        if (navigator.mimeTypes
+            && navigator.mimeTypes['application/x-shockwave-flash'] != undefined
+            && navigator.mimeTypes['application/x-shockwave-flash'].enabledPlugin) {
+            hasFlash = true;
+        }
+    }
+    if (!hasFlash) {
+        $("#player").text("Your browser doesn't support Flash or WebRTC technology needed for this example").css("font-weight", "bold").css("font-size","200%");
+    }
+}
+
 // Check field for empty string
 function checkForEmptyField(checkField, alertDiv) {
 
@@ -711,6 +732,24 @@ var send = function(uri, data, responseIsText) {
         }
     });
 };
+
+function loadPlayer() {
+    detectFlash();
+    var attributes = {};
+    attributes.id = "player";
+    attributes.name = "player";
+    attributes.styleclass="center-block";
+    var flashvars = {};
+    var pathToSWF = "../../dependencies/rtmp_player/player.swf";
+    var elementId = "player";
+    var params = {};
+    params.menu = "true";
+    params.swliveconnect = "true";
+    params.allowfullscreen = "true";
+    params.allowscriptaccess = "always";
+    params.bgcolor = "#777777";
+    swfobject.embedSWF(pathToSWF, elementId, "350", "400", "11.2.202", "expressInstall.swf", flashvars, params, attributes);
+}
 
 function sendREST(url, data, successHandler, errorHandler) {
     console.info("url: " + url);
@@ -830,15 +869,18 @@ function muteErrorHandler(jqXHR, textStatus, errorThrown) {
     $("#restStatus").show().text("Error on mute/unmute");
 }
 
-// Show RTMP URL to play in a third party player (VLC, ffplay etc)
+//
+
+//Call embedded AS3 function (setURLtoFlash)
 function sendDataToPlayer() {
+    var player = document.getElementById("player");
     var host = field("rtmpUrl")
         .replace("localhost", window.location.hostname)
         .replace("127.0.0.1", window.location.hostname);
 
     var rtmpStreamPrefix = "rtmp_";
     var url = host + "/" + rtmpStreamPrefix + field("rtmpStream");
-    $("#player").text(url);
+    player.setURLtoFlash(url);
 }
 
 //Get transponder status

@@ -1,7 +1,6 @@
 var SESSION_STATUS = Flashphoner.constants.SESSION_STATUS;
 var STREAM_STATUS = Flashphoner.constants.STREAM_STATUS;
 var PRELOADER_URL = "../../dependencies/media/preloader.mp4";
-var Browser = Flashphoner.Browser;
 var localVideo;
 
 $(document).ready(function () {
@@ -10,11 +9,12 @@ $(document).ready(function () {
 
 function init_page() {
     $("#url").val(setURL());
+    loadPlayer();
     //init api
     try {
-        Flashphoner.init();
+        Flashphoner.init({flashMediaProviderSwfLocation: '../../../../media-provider.swf'});
     } catch(e) {
-        $("#notifyFlash").text("Your browser doesn't support WebRTC technology needed for this example");
+        $("#notifyFlash").text("Your browser doesn't support Flash or WebRTC technology needed for this example");
         return;
     }
     localVideo = document.getElementById("localVideo");
@@ -43,6 +43,12 @@ function onStopped() {
 function publishBtnClick() {
     if (validateForm()) {
         $(this).prop('disabled', true);
+        if (Browser.isSafariWebRTC()) {
+            Flashphoner.playFirstVideo(localVideo, true, PRELOADER_URL).then(function() {
+                start();
+            });
+            return;
+        }
         start();
     }
 }
@@ -108,16 +114,34 @@ function setStatus(status) {
     }
 }
 
-// Show RTMP URL to play in a third party player (VLC, ffplay etc)
+function loadPlayer() {
+    detectFlash();
+    var attributes = {};
+    attributes.id = "player";
+    attributes.name = "player";
+    attributes.styleclass="center-block";
+    var flashvars = {};
+    var pathToSWF = "../../dependencies/rtmp_player/player.swf";
+    var elementId = "player";
+    var params = {};
+    params.menu = "true";
+    params.swliveconnect = "true";
+    params.allowfullscreen = "true";
+    params.allowscriptaccess = "always";
+    params.bgcolor = "#777777";
+    swfobject.embedSWF(pathToSWF, elementId, "350", "400", "11.2.202", "expressInstall.swf", flashvars, params, attributes);
+}
+
+//Call embedded AS3 function (setURLtoFlash)
 function sendDataToPlayer() {
-    var player = $("#player");
+    var player = document.getElementById("player");
     var host = field("rtmpUrl")
         .replace("localhost", window.location.hostname)
         .replace("127.0.0.1", window.location.hostname);
 
     var rtmpStreamPrefix = "rtmp_";
     var url = host + "/" + rtmpStreamPrefix + field("streamName");
-    player.text(url);
+    player.setURLtoFlash(url);
 }
 
 function validateForm() {

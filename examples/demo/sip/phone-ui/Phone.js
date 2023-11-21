@@ -1,6 +1,5 @@
 var SESSION_STATUS = Flashphoner.constants.SESSION_STATUS;
 var CALL_STATUS = Flashphoner.constants.CALL_STATUS;
-var Browser = Flashphoner.Browser;
 
 var Phone = function () {
     this.flashphonerListener = null;
@@ -116,6 +115,28 @@ Phone.prototype.call = function (callee, hasVideo) {
 
     outCall.call();
 
+    if (Flashphoner.getMediaProviders()[0] == "Flash") {
+        $(".b-video").addClass("flash_access");
+
+        var interval = function() {
+            var flash = document.getElementById(me.currentCall.id());
+            if (flash) {
+                if (me.intervalId == -1) {
+                    var checkAccessFunc = function () {
+                        if (flash.hasAccessToAudio()) {
+                            clearInterval(me.intervalId);
+                            me.intervalId = -1;
+                            me.hideFlashAccess();
+                        }
+                    };
+                    me.intervalId = setInterval(checkAccessFunc, 500);
+                }
+                clearInterval(checkFlash);
+            }
+        };
+        var checkFlash = setInterval(interval, 2000);
+    }
+
     this.currentCall = outCall;
 
 };
@@ -137,6 +158,27 @@ Phone.prototype.answer = function () {
         localVideoDisplay: this.localVideo,
         remoteVideoDisplay: this.remoteVideo
     });
+    if (Flashphoner.getMediaProviders()[0] == "Flash") {
+        $(".b-video").addClass("flash_access");
+        var me = this;
+        var interval = function() {
+            var flash = document.getElementById(me.currentCall.id());
+            if (flash) {
+                if (me.intervalId == -1) {
+                    var checkAccessFunc = function () {
+                        if (flash.hasAccessToAudio()) {
+                            clearInterval(me.intervalId);
+                            me.intervalId = -1;
+                            me.hideFlashAccess();
+                        }
+                    };
+                    me.intervalId = setInterval(checkAccessFunc, 500);
+                }
+                clearInterval(checkFlash);
+            }
+        };
+        var checkFlash = setInterval(interval, 2000);
+    }
 };
 
 Phone.prototype.hangup = function () {
@@ -499,9 +541,16 @@ Phone.prototype.applyCalleeLetterCase = function (callee) {
 $(document).ready(function () {
 
     try {
-        Flashphoner.init();
+        Flashphoner.init({flashMediaProviderSwfLocation: '../../../../media-provider.swf',
+            mediaProvidersReadyCallback: function(mediaProviders) {
+                //hide remote video if current media provider is Flash
+                if (mediaProviders[0] == "Flash") {
+                    $("#remoteVideoWrapper").removeClass().hide();
+                    $("#localVideoWrapper").attr('class', 'b-video__video ui-widget-content');
+                }
+            }});
     } catch(e) {
-        $("#notifyFlash").text("Your browser doesn't support WebRTC technology needed for this example");
+        $("#notifyFlash").text("Your browser doesn't support Flash or WebRTC technology needed for this example");
         return;
     }
 

@@ -1,9 +1,6 @@
 var SESSION_STATUS = Flashphoner.constants.SESSION_STATUS;
 var STREAM_STATUS = Flashphoner.constants.STREAM_STATUS;
-var STREAM_EVENT = Flashphoner.constants.STREAM_EVENT;
-var STREAM_EVENT_TYPE = Flashphoner.constants.STREAM_EVENT_TYPE;
 var PRELOADER_URL = "../../dependencies/media/preloader.mp4";
-var Browser = Flashphoner.Browser;
 var remoteVideo;
 var resolution_for_wsplayer;
 var stream;
@@ -14,19 +11,18 @@ var resolution = getUrlParam("resolution");
 var mediaProvider = getUrlParam("mediaProvider") || null;
 var mseCutByIFrameOnly = getUrlParam("mseCutByIFrameOnly");
 
-var useVideoControls = false;
-
 function init_page() {
 
     //init api
     try {
         Flashphoner.init({
+            flashMediaProviderSwfLocation: '../../../../media-provider.swf',
             receiverLocation: '../../dependencies/websocket-player/WSReceiver2.js',
             decoderLocation: '../../dependencies/websocket-player/video-worker2.js',
             preferredMediaProvider: mediaProvider
         });
     } catch(e) {
-        $("#notifyFlash").text("Your browser doesn't support WebRTC technology needed for this example");
+        $("#notifyFlash").text("Your browser doesn't support Flash or WebRTC technology needed for this example");
         return;
     }
 
@@ -45,27 +41,17 @@ function init_page() {
         animate: true,
         slide: function(event, ui) {
             //WCS-2375. fixed autoplay in ios safari
-            if (stream.isRemoteAudioMuted()) {
-                stream.unmuteRemoteAudio();
-            }
+            stream.unmuteRemoteAudio();
             currentVolumeValue = ui.value;
             stream.setVolume(currentVolumeValue);
         }
     }).slider("disable");
-    onStopped();
-    if (Browser.isSafari()) {
-        // Enable video controls for fullscreen mode to work in Safari 16
-        useVideoControls = true;
+    if (Flashphoner.getMediaProviders()[0] == "Flash") {
         $("#fullScreen").hide();
-        if (Browser.isiOS()) {
-            $("#volume").hide();
-        }
     }
-    if (autoplay) {
-        // We can start autoplay with muted audio only, so set volume slider to 0 #WCS-2425
-        $("#volumeControl").slider('value', 0);
+    onStopped();
+    if (autoplay)
         $("#playBtn").click();
-    }
 }
 
 function onStarted(stream) {
@@ -96,8 +82,8 @@ function playBtnClick() {
         $("#streamName").prop('disabled', true);
         if (Flashphoner.getMediaProviders()[0] === "WSPlayer") {
             Flashphoner.playFirstSound();
-        } else if (Browser.isSafari()) {
-            Flashphoner.playFirstVideo(remoteVideo, false, PRELOADER_URL, useVideoControls).then(function() {
+        } else if (Browser.isSafariWebRTC() || Flashphoner.getMediaProviders()[0] === "MSE") {
+            Flashphoner.playFirstVideo(remoteVideo, false, PRELOADER_URL).then(function() {
                 start();
             }).catch(function () {
                 onStopped();
@@ -111,7 +97,6 @@ function playBtnClick() {
 function start() {
     var url = $('#url').val();
     //check if we already have session
-    $("#preloader").show();
     if (Flashphoner.getSessions().length > 0) {
         var session = Flashphoner.getSessions()[0];
         if (session.getServerUrl() == url) {
@@ -145,7 +130,7 @@ function playStream(session) {
     var options = {
         name: streamName,
         display: remoteVideo,
-        useControls: useVideoControls
+        flashShowFullScreenButton: true
     };
     if (Flashphoner.getMediaProviders()[0] === "MSE" && mseCutByIFrameOnly) {
         options.mediaConnectionConstraints = {
@@ -159,10 +144,8 @@ function playStream(session) {
         options.playWidth = resolution.split("x")[0];
         options.playHeight = resolution.split("x")[1];
     }
-    if (autoplay) {
-        options.unmutePlayOnStart = false;
-    }
     stream = session.createStream(options).on(STREAM_STATUS.PENDING, function (stream) {
+        $("#preloader").show();
         var video = document.getElementById(stream.id());
         if (!video.hasListeners) {
             video.hasListeners = true;
@@ -180,53 +163,29 @@ function playStream(session) {
                         resizeVideo(event.target, options.playWidth, newHeight);
                     }
                 });
-            }
-            if (useVideoControls && Browser.isSafariWebRTC()) {
-                // iOS hack when using standard controls to leave fullscreen mode
-                var needRestart = false;
-                video.addEventListener("pause", function () {
-                    if(needRestart) {
-                        console.log("Video paused after fullscreen, continue...");
-                        video.play();
-                        needRestart = false;
+            } else {
+                //WCS-2375. fixed autoplay in ios safari
+                video.addEventListener('playing', function () {
+                    if (autoplay && stream.isRemoteAudioMuted()) {
+                        $("#volumeControl").slider('value', 0);
                     }
                 });
-                video.addEventListener("webkitendfullscreen", function () {
-                    video.play();
-                    needRestart = true;
-                });                
             }
-            // Hide preloader when playing video
-            video.addEventListener("playing", function () {
-                $("#preloader").hide();
-            });
         }
     }).on(STREAM_STATUS.PLAYING, function (stream) {
-        // Android Firefox may pause stream playback via MSE even if video element is muted
-        if (Flashphoner.getMediaProviders()[0] == "MSE" && autoplay && Browser.isAndroidFirefox()) {
-            let video = document.getElementById(stream.id());
-            if (video && video.paused) {
-                video.play();
-            }
-        }
+        $("#preloader").hide();
         setStatus(stream.status());
         onStarted(stream);
     }).on(STREAM_STATUS.STOPPED, function () {
+        $("#preloader").hide();
         setStatus(STREAM_STATUS.STOPPED);
         onStopped();
     }).on(STREAM_STATUS.FAILED, function(stream) {
+        $("#preloader").hide();
         setStatus(STREAM_STATUS.FAILED, stream);
         onStopped();
-    }).on(STREAM_EVENT, function(streamEvent){
-        if (STREAM_EVENT_TYPE.NOT_ENOUGH_BANDWIDTH === streamEvent.type) {
-            var info = streamEvent.payload.info.split("/");
-            var remoteBitrate = info[0];
-            var networkBandwidth = info[1];
-            console.log("Not enough bandwidth, consider using lower video resolution or bitrate. Bandwidth " + (Math.round(networkBandwidth / 1000)) + " bitrate " + (Math.round(remoteBitrate / 1000)));
-        } else if (STREAM_EVENT_TYPE.RESIZE === streamEvent.type) {
-            console.log("New video size: " + streamEvent.payload.streamerVideoWidth + "x" + streamEvent.payload.streamerVideoHeight);
-        }
-
+    }).on(STREAM_STATUS.NOT_ENOUGH_BANDWIDTH, function(stream){
+        console.log("Not enough bandwidth, consider using lower video resolution or bitrate. Bandwidth " + (Math.round(stream.getNetworkBandwidth() / 1000)) + " bitrate " + (Math.round(stream.getRemoteBitrate() / 1000)));
     });
     stream.play();
 }

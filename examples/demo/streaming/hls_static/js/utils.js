@@ -154,8 +154,7 @@ var Browser = {
         return /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
     },
     isSafari: function () {
-        var userAgent = navigator.userAgent.toLowerCase();
-        return /(safary|applewebkit)/i.test(userAgent) && !userAgent.includes("chrome") && !userAgent.includes("android");
+        return /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
     },
     isAndroid: function () {
         return navigator.userAgent.toLowerCase().indexOf("android") > -1;

@@ -1,11 +1,8 @@
 var SESSION_STATUS = Flashphoner.constants.SESSION_STATUS;
 var STREAM_STATUS = Flashphoner.constants.STREAM_STATUS;
-var STREAM_EVENT = Flashphoner.constants.STREAM_EVENT;
-var STREAM_EVENT_TYPE = Flashphoner.constants.STREAM_EVENT_TYPE;
 var STREAM_STATUS_INFO = Flashphoner.constants.STREAM_STATUS_INFO;
 var ERROR_INFO = Flashphoner.constants.ERROR_INFO;
 var PRELOADER_URL = "../../dependencies/media/preloader.mp4";
-var Browser = Flashphoner.Browser;
 var localVideo;
 var remoteVideo;
 
@@ -16,9 +13,9 @@ var remoteVideo;
 function init_page() {
     //init api
     try {
-        Flashphoner.init();
+        Flashphoner.init({flashMediaProviderSwfLocation: '../../../../media-provider.swf'});
     } catch (e) {
-        $("#notifyFlash").text("Your browser doesn't support WebRTC technology needed for this example");
+        $("#notifyFlash").text("Your browser doesn't support Flash or WebRTC technology needed for this example");
         return;
     }
 
@@ -80,11 +77,6 @@ function onPublishing(stream) {
         stream.stop();
     }).prop('disabled', false);
     $("#publishInfo").text("");
-
-    $('#sendDataBtn').off('click').click(function(){
-        var streamData = field('streamData');
-        stream.sendData(JSON.parse(streamData));
-    }).prop('disabled',false);
 }
 
 function onUnpublished() {
@@ -96,13 +88,18 @@ function onUnpublished() {
         $("#publishBtn").prop('disabled', true);
         $('#publishStream').prop('disabled', true);
     }
-    $('#sendDataBtn').prop('disabled',true);
 }
 
 function publishBtnClick() {
     if (validateForm("streamerForm")) {
         $('#publishStream').prop('disabled', true);
         $(this).prop('disabled', true);
+        if (Browser.isSafariWebRTC()) {
+            Flashphoner.playFirstVideo(localVideo, true, PRELOADER_URL).then(function() {
+                publishStream();
+            });
+            return;
+        }
         publishStream();
     }
 }
@@ -139,6 +136,11 @@ function playBtnClick() {
         $(this).prop('disabled', true);
         if (Flashphoner.getMediaProviders()[0] === "WSPlayer") {
             Flashphoner.playFirstSound();
+        } else if (Browser.isSafariWebRTC() || Flashphoner.getMediaProviders()[0] === "MSE") {
+            Flashphoner.playFirstVideo(remoteVideo, false, PRELOADER_URL).then(function () {
+                playStream();
+            });
+            return;
         }
         playStream();
     }
@@ -190,23 +192,7 @@ function playStream() {
     }).on(STREAM_STATUS.FAILED, function (stream) {
         setStatus("#playStatus", STREAM_STATUS.FAILED, stream);
         onStopped();
-    }).on(STREAM_EVENT, function(streamEvent) {
-        switch (streamEvent.type) {
-            case STREAM_EVENT_TYPE.DATA:
-                addPayload(streamEvent.payload);
-                break;
-        }
-        console.log("Received streamEvent ", streamEvent.type);
     }).play();
-}
-
-function addPayload(payload) {
-    var date = new Date();
-    var time = date.getHours() + ":" + (date.getMinutes()<10?'0':'') + date.getMinutes();
-    var newMessage = time + " - "+JSON.stringify(payload) + '<br/>';
-    var receivedData = $("#receivedData");
-    receivedData.html(receivedData.html() + newMessage);
-    receivedData.scrollTop(receivedData.prop('scrollHeight'));
 }
 
 function availableStream(){
@@ -217,11 +203,8 @@ function availableStream(){
         display: remoteVideo
     }).available().then(function(stream){
         $("#availableStatus").text("AVAILABLE").attr("class", "text-success");
-        $("#availableInfo").text("").attr("class", "text-muted");
     }, function(stream){
-        console.log(stream);
         $("#availableStatus").text("UNAVAILABLE").attr("class", "text-danger");
-        $("#availableInfo").text(stream.getInfo()).attr("class", "text-muted");
     });
 }
 
