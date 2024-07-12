@@ -2,9 +2,10 @@
 var SESSION_STATUS = require('./constants').SESSION_STATUS;
 var STREAM_STATUS = require('./constants').STREAM_STATUS;
 var Promise = require('promise-polyfill');
+const { v1: uuid_v1 } = require('uuid');
 var util = require('./util');
-var uuid_v1 = require('uuid/v1');
 var ROOM_REST_APP = "roomApp";
+var Flashphoner = require('./flashphoner-core');
 
 /**
  * Room api based on core api
@@ -18,15 +19,17 @@ var ROOM_REST_APP = "roomApp";
  * @param {Object} options session options
  * @param {String} options.urlServer Server address in form of [ws,wss]://host.domain:port
  * @param {String} options.username Username to login with
- * @returns {roomApi.Session}
+ * @param {String} options.token JWT Token
+ * @param {String} options.appKey Application Key
+ * @returns {roomApi.RoomSession}
  * @memberof roomApi
  * @method connect
  */
-var appSession = function(options) {
+var appSession = function (options) {
     /**
      * Represents connection to room api app
      *
-     * @namespace roomApi.Session
+     * @namespace roomApi.RoomSession
      */
     var callbacks = {};
     var rooms = {};
@@ -36,20 +39,26 @@ var appSession = function(options) {
     var session = Flashphoner.createSession({
         urlServer: options.urlServer,
         mediaOptions: options.mediaOptions,
-        appKey: (options.appKey && options.appKey.length!=0) ? options.appKey: ROOM_REST_APP,
+        appKey: (options.appKey && options.appKey.length != 0) ? options.appKey : ROOM_REST_APP,
         custom: {
             login: options.username,
             token: options.token
         }
-    }).on(SESSION_STATUS.ESTABLISHED, function(session){
+    }).on(SESSION_STATUS.ESTABLISHED, function (session) {
         if (callbacks[session.status()]) {
             callbacks[session.status()](exports);
         }
-    }).on(SESSION_STATUS.APP_DATA, function(data){
-        if (roomHandlers[data.payload.roomName]) {
-            roomHandlers[data.payload.roomName](data.payload);
+    }).on(SESSION_STATUS.APP_DATA, function (data) {
+        var payload = data.payload;
+        if (!payload || !payload.roomName) {
+            console.error("Received app data does not contain 'payload' or 'payload.roomName' field. Received data: " + JSON.stringify(data));
+            return;
+        }
+        var roomName = payload.roomName;
+        if (roomHandlers[roomName]) {
+            roomHandlers[roomName](payload);
         } else {
-            console.warn("Failed to find room");
+            console.warn("Failed to find room with name " + roomName);
         }
     }).on(SESSION_STATUS.DISCONNECTED, sessionDied).on(SESSION_STATUS.FAILED, sessionDied);
 
@@ -63,10 +72,10 @@ var appSession = function(options) {
     /**
      * Disconnect session
      *
-     * @memberof roomApi.Session
+     * @memberof roomApi.RoomSession
      * @inner
      */
-    var disconnect = function(){
+    var disconnect = function () {
         session.disconnect();
     };
 
@@ -74,10 +83,10 @@ var appSession = function(options) {
      * Get session status
      *
      * @returns {string} One of {@link Flashphoner.constants.SESSION_STATUS}
-     * @memberof roomApi.Session
+     * @memberof roomApi.RoomSession
      * @inner
      */
-    var status = function() {
+    var status = function () {
         return session.status();
     };
 
@@ -85,10 +94,10 @@ var appSession = function(options) {
      * Get session id
      *
      * @returns {string} session id
-     * @memberof roomApi.Session
+     * @memberof roomApi.RoomSession
      * @inner
      */
-    var id = function() {
+    var id = function () {
         return session.id();
     };
 
@@ -96,10 +105,10 @@ var appSession = function(options) {
      * Get server address
      *
      * @returns {string} Server url
-     * @memberof roomApi.Session
+     * @memberof roomApi.RoomSession
      * @inner
      */
-    var getServerUrl = function() {
+    var getServerUrl = function () {
         return session.getServerUrl();
     };
 
@@ -107,10 +116,10 @@ var appSession = function(options) {
      * Get session username
      *
      * @returns {string} username
-     * @memberof roomApi.Session
+     * @memberof roomApi.RoomSession
      * @inner
      */
-    var username = function() {
+    var username = function () {
         return username_;
     };
 
@@ -118,10 +127,10 @@ var appSession = function(options) {
      * Get rooms
      *
      * @returns {roomApi.Room[]}
-     * @memberof roomApi.Session
+     * @memberof roomApi.RoomSession
      * @inner
      */
-    var getRooms = function(){
+    var getRooms = function () {
         return util.copyObjectToArray(rooms);
     };
 
@@ -130,14 +139,14 @@ var appSession = function(options) {
      * Add session event callback.
      *
      * @param {string} event One of {@link Flashphoner.constants.SESSION_STATUS} events
-     * @param {Session~eventCallback} callback Callback function
-     * @returns {roomApi.Session} Session
+     * @param {RoomSession~eventCallback} callback Callback function
+     * @returns {roomApi.RoomSession} Room Session
      * @throws {TypeError} Error if event is not specified
      * @throws {Error} Error if callback is not a valid function
-     * @memberof roomApi.Session
+     * @memberof roomApi.RoomSession
      * @inner
      */
-    var on = function(event, callback) {
+    var on = function (event, callback) {
         if (!event) {
             throw new Error("Event can't be null", "TypeError");
         }
@@ -153,11 +162,12 @@ var appSession = function(options) {
      *
      * @param {Object} options Room options
      * @param {String} options.name Room name
+     * @param {Boolean} options.record Record
      * @returns {roomApi.Room}
-     * @memberof roomApi.Session
+     * @memberof roomApi.RoomSession
      * @inner
      */
-    var join = function(options) {
+    var join = function (options) {
         /**
          * Room
          *
@@ -165,10 +175,11 @@ var appSession = function(options) {
          */
         var room = {};
         var name_ = options.name;
+        var record_ = options.record;
         var participants = {};
         var callbacks = {};
         var stateStreams = {};
-        roomHandlers[name_] = function(data) {
+        roomHandlers[name_] = function (data) {
             /**
              * Room participant
              *
@@ -188,11 +199,13 @@ var appSession = function(options) {
             } else if (data.name == "JOINED") {
                 participants[data.info] = {
                     streams: {},
-                    name: function(){
+                    name: function () {
                         return data.info;
                     },
                     sendMessage: attachSendMessage(data.info),
-                    getStreams: function() { return util.copyObjectToArray(this.streams);}
+                    getStreams: function () {
+                        return util.copyObjectToArray(this.streams);
+                    }
                 };
                 if (callbacks["JOINED"]) {
                     callbacks["JOINED"](participants[data.info]);
@@ -209,7 +222,9 @@ var appSession = function(options) {
                     play: play(data.info.name),
                     stop: stop(data.info.name),
                     id: id(data.info.name),
-                    streamName: function() {return data.info.name}
+                    streamName: function () {
+                        return data.info.name
+                    }
                 };
                 if (callbacks["PUBLISHED"]) {
                     callbacks["PUBLISHED"](participant);
@@ -267,7 +282,9 @@ var appSession = function(options) {
                      * @memberof roomApi.Room.Participant.Stream
                      * @inner
                      */
-                    streamName: function(){return streamName}
+                    streamName: function () {
+                        return streamName
+                    }
                 };
 
                 if (participants[login] != null) {
@@ -282,7 +299,7 @@ var appSession = function(options) {
                          * @memberof roomApi.Room.Participant
                          * @inner
                          */
-                        name: function(){
+                        name: function () {
                             return login;
                         },
                         /**
@@ -301,7 +318,9 @@ var appSession = function(options) {
                          * @memberof roomApi.Room.Participant
                          * @inner
                          */
-                        getStreams: function() { return util.copyObjectToArray(this.streams);}
+                        getStreams: function () {
+                            return util.copyObjectToArray(this.streams);
+                        }
                     };
                     participants[participant.name()] = participant;
                 }
@@ -313,14 +332,16 @@ var appSession = function(options) {
             } else {
                 participant = {
                     streams: {},
-                    name: function(){
+                    name: function () {
                         return state;
                     },
                     sendMessage: attachSendMessage(state),
-                    getStreams: function() {return util.copyObjectToArray(this.streams);}
+                    getStreams: function () {
+                        return util.copyObjectToArray(this.streams);
+                    }
                 }
             }
-            if (Object.keys(stateStreams).length !=0 ) {
+            if (Object.keys(stateStreams).length != 0) {
                 for (var k in stateStreams) {
                     if (stateStreams.hasOwnProperty(k)) {
                         participant.streams[k] = stateStreams[k];
@@ -339,7 +360,7 @@ var appSession = function(options) {
          * @memberof roomApi.Room
          * @inner
          */
-        var name = function() {
+        var name = function () {
             return name_;
         };
 
@@ -350,12 +371,12 @@ var appSession = function(options) {
          * @memberof roomApi.Room
          * @inner
          */
-        var leave = function() {
-            return new Promise(function(resolve, reject){
-                sendAppCommand("leave", {name: name_}).then(function(){
+        var leave = function () {
+            return new Promise(function (resolve, reject) {
+                sendAppCommand("leave", {name: name_}).then(function () {
                     cleanUp();
                     resolve(room);
-                }, function(){
+                }, function () {
                     cleanUp();
                     reject(room);
                 });
@@ -389,8 +410,8 @@ var appSession = function(options) {
          * @memberof roomApi.Room
          * @inner
          */
-        var publish = function(options) {
-            options.name = (options.name) ? (name_ + "-" + username_ + "-" + uuid_v1().substr(0,4) + "-" + options.name) : (name_ + "-" + username_ + "-" + uuid_v1().substr(0,4));
+        var publish = function (options) {
+            options.name = (options.name) ? (name_ + "-" + username_ + "-" + uuid_v1().substr(0, 4) + "-" + options.name) : (name_ + "-" + username_ + "-" + uuid_v1().substr(0, 4));
             options.cacheLocalResources = (typeof options.cacheLocalResources === "boolean") ? options.cacheLocalResources : true;
             options.custom = {name: name_};
             var stream = session.createStream(options);
@@ -409,7 +430,7 @@ var appSession = function(options) {
          * @memberof roomApi.Room
          * @inner
          */
-        var on = function(event, callback) {
+        var on = function (event, callback) {
             if (!event) {
                 throw new Error("Event can't be null", "TypeError");
             }
@@ -427,21 +448,28 @@ var appSession = function(options) {
          * @memberof roomApi.Room
          * @inner
          */
-        var getParticipants = function() {
+        var getParticipants = function () {
             return util.copyObjectToArray(participants);
         };
 
         //participant helpers
         function play(streamName) {
-            return function(display){
-                var stream = session.createStream({name: streamName, display: display, custom: {name: name_}});
+            // Pass stream options to play #WCS-3445
+            return function (display, options = {}) {
+                var streamOptions = {
+                    ...options,
+                    name: streamName,
+                    display: display,
+                    custom: {name: name_}
+                };
+                var stream = session.createStream(streamOptions);
                 stream.play();
                 return stream;
             }
         }
 
         function stop(streamName) {
-            return function() {
+            return function () {
                 var streams = session.getStreams();
                 for (var i = 0; i < streams.length; i++) {
                     if (streams[i].name() == streamName && streams[i].status() != STREAM_STATUS.UNPUBLISHED) {
@@ -452,7 +480,7 @@ var appSession = function(options) {
         }
 
         function id(streamName) {
-            return function() {
+            return function () {
                 var streams = session.getStreams();
                 for (var i = 0; i < streams.length; i++) {
                     if (streams[i].name() == streamName)
@@ -462,7 +490,7 @@ var appSession = function(options) {
         }
 
         function attachSendMessage(recipientName) {
-            return function(text, error) {
+            return function (text, error) {
                 var message = {
                     roomConfig: {
                         name: name_
@@ -470,7 +498,8 @@ var appSession = function(options) {
                     to: recipientName,
                     text: text
                 };
-                sendAppCommand("sendMessage", message).then(function(){}, function(){
+                sendAppCommand("sendMessage", message).then(function () {
+                }, function () {
                     if (error) {
                         error();
                     }
@@ -487,7 +516,8 @@ var appSession = function(options) {
             return session.sendData(command);
         }
 
-        sendAppCommand("join", {name: name_}).then(function(){}, function(info){
+        sendAppCommand("join", {name: name_, record: record_}).then(function () {
+        }, function (info) {
             if (callbacks["FAILED"]) {
                 callbacks["FAILED"](room, info.info);
             }
@@ -502,7 +532,7 @@ var appSession = function(options) {
     };
 
 
-    exports =  {
+    exports = {
         disconnect: disconnect,
         id: id,
         getServerUrl: getServerUrl,
@@ -526,5 +556,6 @@ var events = {
 
 module.exports = {
     connect: appSession,
-    events: events
+    events: events,
+    sdk: Flashphoner    
 };

@@ -1,7 +1,7 @@
-'use strict';
+-'use strict';
 
 var browserDetails = require('webrtc-adapter').default.browserDetails;
-var uuid_v1 = require('uuid/v1');
+const { v1: uuid_v1 } = require('uuid');
 var util = require('./util');
 var connections = {};
 var LOCAL_CACHED_VIDEO = "-LOCAL_CACHED_VIDEO";
@@ -24,6 +24,11 @@ let audioSourceDevice = "";
 
 var createConnection = function (options) {
     return new Promise(function (resolve, reject) {
+
+        // Set connection logger #WCS-2434
+        if (options.logger) {
+            logger = options.logger;
+        }
 
         var id = options.id;
         var connectionConfig = options.connectionConfig || {"iceServers": []};
@@ -82,7 +87,7 @@ var createConnection = function (options) {
             }
             remoteVideo = getCacheInstance(remoteDisplay);
             if (!remoteVideo) {
-                remoteVideo = document.createElement('video');
+                remoteVideo = createVideoElement(useControls);
                 remoteDisplay.appendChild(remoteVideo);
             }
             remoteVideo.id = id + "-remote";
@@ -103,7 +108,7 @@ var createConnection = function (options) {
                     if (cachedVideo) {
                         remoteVideo = cachedVideo;
                     } else {
-                        remoteVideo = document.createElement('video');
+                        remoteVideo = createVideoElement(useControls);
                         display.appendChild(remoteVideo);
                     }
                     remoteVideo.id = id;
@@ -121,22 +126,31 @@ var createConnection = function (options) {
                     setContentHint(localVideo.srcObject, videoContentHint);
                     addStreamTracks(connection, localVideo.srcObject);
                 }
+            } else {
+                // There is a custom video element, get its id if set #WCS-3606
+                if (remoteVideo.id) {
+                    id = remoteVideo.id;
+                }
             }
         }
         if (localVideo) {
+            // Enable local video controls if option requires #WCS-3606
+            if (useControls) {
+                enableVideoControls(localVideo);
+            }
             var videoTrack = localVideo.srcObject.getVideoTracks()[0];
             if (videoTrack) {
-                videoCams.forEach((cam) => {
-                   if (videoTrack.label === cam.label) {
-                       switchCamCount = videoCams.length;
-                   }
-                });
+                videoCams.forEach((cam, index) => {
+                    if (videoTrack.label === cam.label) {
+                        switchCamCount = index;
+                    }
+                 });
             }
             var audioTrack = localVideo.srcObject.getAudioTracks()[0];
             if (audioTrack) {
-                mics.forEach((mic) => {
+                mics.forEach((mic, index) => {
                     if (audioTrack.label === mic.label) {
-                        switchMicCount = mics.length;
+                        switchMicCount = index;
                     }
                 });
             }
@@ -197,7 +211,7 @@ var createConnection = function (options) {
                 //WCS-2771 add playback delay
                 connection.getReceivers().forEach((track) => {
                     if (track.playoutDelayHint === undefined) {
-                        logger.warn("playout delay unsupported");
+                        logger.warn(LOG_PREFIX, "Playout delay unsupported");
                     }
                     track.playoutDelayHint = playoutDelay;
                 });
@@ -545,7 +559,13 @@ var createConnection = function (options) {
                 if (!document.fullscreenElement && !document.mozFullScreenElement &&
                     !document.webkitFullscreenElement && !document.msFullscreenElement) {
                     if (video.requestFullscreen) {
-                        video.requestFullscreen();
+                        var result = video.requestFullscreen();
+                        // Chromium based browsers return a promise which is rejected although user click is present #WCS-3606
+                        if (util.isPromise(result)) {
+                            result.catch(function(e) {
+                                logger.debug(LOG_PREFIX, e);
+                            });
+                        }
                     } else if (video.msRequestFullscreen) {
                         video.msRequestFullscreen();
                     } else if (video.mozRequestFullScreen) {
@@ -554,10 +574,18 @@ var createConnection = function (options) {
                         video.webkitRequestFullscreen();
                     } else if (video.webkitEnterFullscreen) {
                         video.webkitEnterFullscreen();
-                        //hack for iOS safari. Video is getting paused when switching from fullscreen to normal mode.
+                        // iOS (all versions)/MacOS (since 15) Safari hack: video is paused when leaving fullscreen mode #WCS-3606
+                        var needRestart = false;
                         video.addEventListener("pause", function () {
-                            video.play();
+                            if(needRestart) {
+                                video.play();
+                                needRestart = false;
+                            }
                         });
+                        video.addEventListener("webkitendfullscreen", function () {
+                            video.play();
+                            needRestart = true;
+                        });       
                     }
                 } else {
                     if (document.exitFullscreen) {
@@ -580,7 +608,7 @@ var createConnection = function (options) {
                         if (sender.track.kind === 'audio') return;
                         switchCamCount = (switchCamCount + 1) % videoCams.length;
                         sender.track.stop();
-                        var cam = (typeof deviceId !== "undefined") ? deviceId : videoCams[switchCamCount];
+                        var cam = (typeof deviceId !== "undefined") ? deviceId : videoCams[switchCamCount].id;
                         //use the settings that were set during connection initiation
                         var clonedConstraints = Object.assign({}, constraints);
                         clonedConstraints.video.deviceId = {exact: cam};
@@ -595,7 +623,7 @@ var createConnection = function (options) {
                             if (localVideo.srcObject.getAudioTracks().length == 0 && audioTrack) {
                                 localVideo.srcObject.addTrack(audioTrack);
                             }
-                            logger.info("Switch camera to " + cam);
+                            logger.info(LOG_PREFIX, "Switch camera to " + cam);
                             resolve(cam);
                         }).catch(function (reason) {
                             logger.error(LOG_PREFIX, reason);
@@ -619,7 +647,7 @@ var createConnection = function (options) {
                         if (microphoneGain) {
                             microphoneGain.release();
                         }
-                        var mic = (typeof deviceId !== "undefined") ? deviceId : mics[switchMicCount];
+                        var mic = (typeof deviceId !== "undefined") ? deviceId : mics[switchMicCount].id;
                         //use the settings that were set during connection initiation
                         var clonedConstraints = Object.assign({}, constraints);
                         clonedConstraints.audio.deviceId = {exact: mic};
@@ -646,7 +674,7 @@ var createConnection = function (options) {
                             if (videoTrack) {
                                 localVideo.srcObject.addTrack(videoTrack);
                             }
-                            logger.info("Switch mic to " + mic);
+                            logger.info(LOG_PREFIX, "Switch mic to " + mic);
                             resolve(mic);
                         }).catch(function (reason) {
                             logger.error(LOG_PREFIX, reason);
@@ -669,7 +697,7 @@ var createConnection = function (options) {
                     if (browserDetails.browser === 'firefox') {
                         clonedConstraints.video.mediaSource = source;
                     }
-                    if (window.chrome && woExtension) {
+                    if (woExtension) {
                         getScreenDeviceIdWoExtension(clonedConstraints).then(function (screenSharingConstraints) {
                             navigator.mediaDevices.getDisplayMedia(screenSharingConstraints).then(
                                 (stream) => {
@@ -734,7 +762,7 @@ var createConnection = function (options) {
                     localVideo.srcObject.addTrack(currentAudioTrack);
                 }
             });
-            logger.info("Switch to screen");
+            logger.info(LOG_PREFIX, "Switch to screen");
             screenShare = true;
             resolve();
         };
@@ -780,7 +808,7 @@ var createConnection = function (options) {
                     }
                 });
             }
-            logger.info("Switch to cam");
+            logger.info(LOG_PREFIX, "Switch to cam");
             screenShare = false;
         };
 
@@ -836,6 +864,7 @@ var createConnection = function (options) {
         resolve(exports);
     });
 };
+
 
 
 var mixAudioTracks = function (stream1, stream2) {
@@ -973,13 +1002,13 @@ var getMediaAccess = function (constraints, display, disableConstraintsNormaliza
 var loadOrdinaryVideo = function(display, stream, screenShare, constraints, video) {
     let vEl = video;
     if (!vEl) {
-        vEl = document.createElement('video');
+        vEl = createVideoElement();
         display.appendChild(vEl);
     }
-    vEl.id = uuid_v1() + LOCAL_CACHED_VIDEO;
+    if (!vEl.id) {
+        vEl.id = uuid_v1() + LOCAL_CACHED_VIDEO;
+    }
     vEl.srcObject = stream;
-    //mute audio
-    vEl.muted = true;
     vEl.onloadedmetadata = function (e) {
         //WCS-2751 Add screen capture using getDisplayMedia in Safari
         if (screenShare && !screenCaptureSupportedBrowsers()) {
@@ -1006,7 +1035,9 @@ var loadCanvasVideo = function (display, stream, video) {
             vEl = canvas;
         }
     }
-    vEl.id = uuid_v1() + LOCAL_CACHED_VIDEO;
+    if (!vEl.id) {
+        vEl.id = uuid_v1() + LOCAL_CACHED_VIDEO;
+    }
 
     let child = vEl.children[0];
     child.srcObject = stream;
@@ -1020,7 +1051,7 @@ var loadCanvasVideo = function (display, stream, video) {
         resizeCanvas(vEl, child.videoWidth, child.videoHeight);
     };
     // https://bugzilla.mozilla.org/show_bug.cgi?id=1572422
-    if (Browser.isFirefox()) {
+    if (util.Browser.isFirefox()) {
         vEl.getContext('2d');
     }
     vEl.srcObject = vEl.captureStream(30);
@@ -1369,6 +1400,12 @@ function removeVideoElement(video) {
     }
 }
 
+function enableVideoControls(video) {
+    if(video && !video.controls) {
+        video.setAttribute("controls", "controls");
+    }
+}
+
 /**
  * Check WebRTC available
  *
@@ -1537,12 +1574,12 @@ var playFirstSound = function () {
     return false;
 };
 
-var playFirstVideo = function (display, isLocal, src) {
+var playFirstVideo = function (display, isLocal, src, useControls = false) {
     return new Promise(function (resolve, reject) {
         if (!getCacheInstance(display)) {
-            var video = document.createElement('video');
-            video.setAttribute("playsinline", "");
-            video.setAttribute("webkit-playsinline", "");
+            var video = createVideoElement(useControls);
+            //Mute video tag to prevent local audio playback in Safari #WCS-3430
+            video.muted = true;
             video.id = uuid_v1() + (isLocal ? LOCAL_CACHED_VIDEO : REMOTE_CACHED_VIDEO);
 
             //in WCS-1560 we removed video.play() call, because it triggers the “Unhandled Promise Rejection” exception in iOS Safari
@@ -1551,6 +1588,7 @@ var playFirstVideo = function (display, isLocal, src) {
                 video.src = src;
                 video.play().then(function () {
                     display.appendChild(video);
+                    video.removeAttribute("src");
                     resolve();
                 }).catch(function () {
                     //WCS-2375. fixed autoplay in ios safari
@@ -1558,6 +1596,7 @@ var playFirstVideo = function (display, isLocal, src) {
                     video.muted = true;
                     video.play().then(function () {
                         display.appendChild(video);
+                        video.removeAttribute("src");
                         resolve();
                     });
                     //WCS-2375. low power mode suspends video play
@@ -1573,7 +1612,7 @@ var playFirstVideo = function (display, isLocal, src) {
 };
 
 var screenCaptureSupportedBrowsers = function () {
-    return (Browser.isChrome() || Browser.isSafari());
+    return (util.Browser.isChrome() || util.Browser.isSafari());
 };
 
 module.exports = {

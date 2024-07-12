@@ -7,12 +7,6 @@ Flashphoner [WebCallServer](https://flashphoner.com) JavaScript API (Web SDK) im
 ## Install
 npm install @flashphoner/websdk
 
-```bash
-mkdir flex_sdk_4.6
-wget http://download.macromedia.com/pub/flex/sdk/flex_sdk_4.6.zip
-unzip flex_sdk_4.6.zip -d flex_sdk_4.6
-```
-
 ## Using prebuild Javascript bundle in browser
 two-way-streaming.html:
 ```HTML
