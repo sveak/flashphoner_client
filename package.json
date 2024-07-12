@@ -4,7 +4,7 @@
   "description": "UnOfficial Flashphoner WebCallServer WebSDK package",
   "main": "./src/flashphoner-core.js",
   "scripts": {
-    "build": "cross-env grunt release",
+    "build": "grunt release && grunt clean:build",
     "clean": "grunt clean:release"
   },
   "dependencies": {
@@ -21,7 +21,6 @@
     "@babel/preset-env": "^7.4.3",
     "babelify": "^10.0.0",
     "chai": "^3.5.0",
-    "cross-env": "^7.0.2",
     "grunt": "^1.0.1",
     "grunt-browserify": "^5.0.0",
     "grunt-cli": "^1.3.2",

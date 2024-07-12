@@ -246,6 +246,9 @@ module.exports = function(grunt) {
                 'flashphoner-temasys-flash-websocket.min.js',
                 'flashphoner-rest-api.js',
                 'flashphoner-room-api.js',
+                'flashphoner-room-api.min.js',
+                'flashphoner-webrtc-only.js',
+                'flashphoner-webrtc-only.min.js',
                 'media-provider.swf',
                 'doc/'
             ],
