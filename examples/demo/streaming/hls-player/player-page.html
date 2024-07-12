@@ -1,16 +1,18 @@
     <div class="row">
-        <div class="col-sm-12 text-center" style="max-width: 525px">
+        <div class="col-sm-12 text-center" style="max-width: 500px">
 
             <h2 id="header"></h2>
 
             <h2 id="notifyFlash" class="text-danger"></h2>
             <fieldset id="fieldset" class="scheduler-border fp-streamingControls">
                 <div class="row" style="margin-top: 20px">
-                    <label class="control-label col-sm-1 fp-buttonVerticalAlign text-right" for="urlServer">WCS
-                        URL</label>
+                    <div id="urlForm" class="form-group">
+                        <label class="control-label col-sm-1 fp-buttonVerticalAlign text-right" for="urlServer">WCS
+                            URL</label>
 
-                    <div class="col-sm-12">
-                        <input type="text" class="form-control" id="urlServer" placeholder="WCS Server URL"/>
+                        <div class="col-sm-12">
+                            <input type="text" class="form-control" id="urlServer" placeholder="WCS Server URL"/>
+                        </div>
                     </div>
                 </div>
 
@@ -26,9 +28,9 @@
                 </div>
 
                 <div class="row" style="margin-top:10px">
-                    <div class="form-group">
+                    <div id="authForm" class="form-group">
                         <label class="control-label col-sm-1 fp-buttonVerticalAlign  text-left"
-                               for="playStream">Auth</label>
+                               for="key">Auth</label>
 
                         <div class="col-sm-12">
                             <div class="col-sm-4 nopadding">
@@ -41,19 +43,99 @@
                         </div>
                     </div>
                 </div>
-                <div class="row" style="margin-top: 20px">
-                    <div class="col-sm-12 text-right">
+
+                <div class="row" style="margin-top:10px">
+                    <div id="linkForm" class="form-group">
+                        <label class="control-label col-sm-12 fp-buttonVerticalAlign  text-left"
+                               for="fullLink">Or set a full HLS stream URL</label>
+
+                        <div class="col-sm-12">
+                            <input type="text" class="form-control" id="fullLink" placeholder="Full HLS link"/>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="row" style="margin-top: 10px">
+                    <div class="col-sm-4 text-left" id="llHlsMode" style="display: none;">
+                        <input id="llHlsEnabled" class="form-check-input" type="checkbox" value="">
+                        <label class="form-check-label" for="llHlsEnabled">Low latency HLS</label>
+                    </div>
+                </div>
+                <div class="row" style="margin-top: 5px">
+                    <div class="col-sm-12 text-center">
+                        <a id="permalink" href="#">Permalink</a>
+                    </div>
+                </div>
+                <div class="row" style="margin-top: 10px">
+                    <div class="col-sm-12 text-center">
                         <button id="applyBtn" type="button" class="btn btn-default">Play</button>
+                    </div>
+                </div>
+
+                <div class="row" style="margin-top: 10px">
+                    <div class="col-sm-12" id="quality" style="display: none;">
+                        <div class="col-sm-4 text-right">
+                            <label class="form-check-label" for="qualityBtns">Quality</label>
+                        </div>
+                        <div class="col-sm-8 text-center">
+                            <div class="input-group-btn" id="qualityBtns">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="row" style="margin-top: 10px">
+                    <div class="col-sm-12" id="backward" style="display: none;">
+                        <div class="col-sm-4 text-right">
+                            <label class="form-check-label" for="backBtnMax">Rewind back</label>
+                        </div>
+                        <div class="col-sm-8 text-center">
+                            <div class="input-group-btn">
+                                <button id="backBtnMax" type="button" class="btn btn-default">Max</button>
+                                <button id="backBtn30" type="button" class="btn btn-default">30</button>
+                                <button id="backBtn10" type="button" class="btn btn-default">10</button>
+                                <button id="liveBtn" type="button" class="btn btn-default">Live</button>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </fieldset>
         </div>
     </div>
     <div class="row">
-        <div class="col-sm-12 text-center" style="margin-top: 20px; max-width: 852px">
-            <video id="remoteVideo" width="852" height="480"
+        <div id="videoContainer" style="margin-top: 20px; width: available; height: 56.25vw">
+            <video id="remoteVideo"
+                   width="100%"
+                   height="100%"
                    controls="controls"
                    autoplay="autoplay"
                    type="application/vnd.apple.mpegurl"></video>
+        </div>
+    </div>
+    <div id="stats" class="row" style="display: none;">
+        <div class="col-sm-12">
+            <div class="row" style="margin-top: 20px">
+                <div class="col-sm-2">
+                    <label class="form-check-label" for="videoWidth">Video width</label>
+                </div>
+                <div class="col-sm-2" id="videoWidth"></div>
+            </div>
+            <div class="row" style="margin-top: 10px">
+                <div class="col-sm-2">
+                    <label class="form-check-label" for="videoHeight">Video height</label>
+                </div>
+                <div class="col-sm-2" id="videoHeight"></div>
+            </div>
+            <div class="row" style="margin-top: 10px">
+                <div class="col-sm-2">
+                    <label class="form-check-label" for="videoRate">Bitrate, bps</label>
+                </div>
+                <div class="col-sm-2" id="videoRate"></div>
+            </div>
+            <div class="row" style="margin-top: 10px">
+                <div class="col-sm-2">
+                    <label class="form-check-label" for="videoFps">Framerate</label>
+                </div>
+                <div class="col-sm-2" id="videoFps"></div>
+            </div>
         </div>
     </div>

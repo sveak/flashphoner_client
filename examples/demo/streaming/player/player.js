@@ -40,10 +40,8 @@ function init_page() {
         step: 10,
         animate: true,
         slide: function(event, ui) {
-            //WCS-2375. fixed autoplay in ios safari
-            stream.unmuteRemoteAudio();
             currentVolumeValue = ui.value;
-            stream.setVolume(currentVolumeValue);
+            setStreamVolume(stream, currentVolumeValue);
         }
     }).slider("disable");
     if (Flashphoner.getMediaProviders()[0] == "Flash") {
@@ -73,6 +71,8 @@ function onStopped() {
     $("#volumeControl").slider("disable");
     $("#fullScreenBtn").prop('disabled', true);
     $("#preloader").hide();
+    $("#unmuteBtn").off('click').click(unmuteBtnClick);
+    $("#unmute").hide();
 }
 
 function playBtnClick() {
@@ -92,6 +92,11 @@ function playBtnClick() {
         }
         start();
     }
+}
+
+function unmuteBtnClick() {
+    setStreamVolume(stream, currentVolumeValue)
+    $("#volumeControl").slider('value', currentVolumeValue);
 }
 
 function start() {
@@ -171,6 +176,18 @@ function playStream(session) {
                     }
                 });
             }
+            // Hide preloader when playing video
+            video.addEventListener("playing", function () {
+                $("#preloader").hide();
+            });
+            // Hide unmute button
+            video.addEventListener("volumechange", function () {
+                if (video.muted) {
+                    $("#unmute").show();
+                } else {
+                    $("#unmute").hide();
+                }
+            });
         }
     }).on(STREAM_STATUS.PLAYING, function (stream) {
         $("#preloader").hide();
@@ -184,8 +201,18 @@ function playStream(session) {
         $("#preloader").hide();
         setStatus(STREAM_STATUS.FAILED, stream);
         onStopped();
-    }).on(STREAM_STATUS.NOT_ENOUGH_BANDWIDTH, function(stream){
-        console.log("Not enough bandwidth, consider using lower video resolution or bitrate. Bandwidth " + (Math.round(stream.getNetworkBandwidth() / 1000)) + " bitrate " + (Math.round(stream.getRemoteBitrate() / 1000)));
+    }).on(STREAM_EVENT, function(streamEvent){
+        if (STREAM_EVENT_TYPE.NOT_ENOUGH_BANDWIDTH === streamEvent.type) {
+            var info = streamEvent.payload.info.split("/");
+            var remoteBitrate = info[0];
+            var networkBandwidth = info[1];
+            console.log("Not enough bandwidth, consider using lower video resolution or bitrate. Bandwidth " + (Math.round(networkBandwidth / 1000)) + " bitrate " + (Math.round(remoteBitrate / 1000)));
+        } else if (STREAM_EVENT_TYPE.RESIZE === streamEvent.type) {
+            console.log("New video size: " + streamEvent.payload.streamerVideoWidth + "x" + streamEvent.payload.streamerVideoHeight);
+        } else if (STREAM_EVENT_TYPE.UNMUTE_REQUIRED === streamEvent.type) {
+            console.log("Stream is muted by autoplay policy, user action required to unmute");
+            $("#unmute").show();
+        }
     });
     stream.play();
 }
@@ -205,6 +232,15 @@ function setStatus(status, stream) {
         if (stream) {
             infoField.text(stream.getInfo()).attr("class","text-muted");
         }
+    }
+}
+
+function setStreamVolume(stream, currentVolumeValue) {
+    if (stream) {
+        if (stream.isRemoteAudioMuted()) {
+            stream.unmuteRemoteAudio();
+        }
+        stream.setVolume(currentVolumeValue);
     }
 }
 

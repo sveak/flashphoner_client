@@ -19,6 +19,8 @@ var validBrowsers = ["firefox", "chrome", "safari"];
 var videoCams = [];
 // list of presented audio input devices
 var mics = [];
+// current audio source device label
+let audioSourceDevice = "";
 
 var createConnection = function (options) {
     return new Promise(function (resolve, reject) {
@@ -50,6 +52,15 @@ var createConnection = function (options) {
         var constraints = options.constraints ? options.constraints : {};
         var screenShare = false;
         var playoutDelay = options.playoutDelay;
+        // Set video track contentHint to `detail` by default to workaround Chromium 91 bug #WCS-3257
+        // Set video track contentHint to `motion` by default to keep bitrate and fps for better camera stream quality #WCS-4109
+        var videoContentHint = options.videoContentHint ? options.videoContentHint : 'motion';
+        // Pass the option to unmute automatically (true by default) #WCS-2425
+        var unmutePlayOnStart = options.unmutePlayOnStart !== undefined ? options.unmutePlayOnStart : true;
+        // Use a standard HTML5 video controls if needed (to enable fullscreen in Safari 16 for example) #WCS-3606
+        var useControls = options.useControls || false;
+        // Stream event handler to rise an event #WCS-4097
+        var unmuteRequiredEvent = options.unmuteRequiredEvent ? options.unmuteRequiredEvent : null;
 
         if (customStream) {
             // Process when new tracks added (`addtrack` event doesn't work here!)
@@ -63,7 +74,8 @@ var createConnection = function (options) {
                 //made for safari, if sip call without audio and video, because function playFirstVideo() creates a video element
                 if (localVideo.srcObject) {
                     localVideo.id = id + "-local";
-                    connection.addStream(localVideo.srcObject);
+                    setContentHint(localVideo.srcObject, videoContentHint);
+                    addStreamTracks(connection, localVideo.srcObject);
                 } else {
                     localVideo = null;
                 }
@@ -106,7 +118,8 @@ var createConnection = function (options) {
                 } else {
                     localVideo = cachedVideo;
                     localVideo.id = id;
-                    connection.addStream(localVideo.srcObject);
+                    setContentHint(localVideo.srcObject, videoContentHint);
+                    addStreamTracks(connection, localVideo.srcObject);
                 }
             }
         }
@@ -128,36 +141,53 @@ var createConnection = function (options) {
                 });
             }
         }
+        if (remoteVideo) {
+            // Enable remote video  controls if option requires #WCS-3606
+            if (useControls) {
+                enableVideoControls(remoteVideo);
+            }
+        }
+        function setContentHint(stream, hint) {
+            stream.getVideoTracks().forEach(function(track) {
+                if(track.contentHint === undefined) {
+                    logger.warn(LOG_PREFIX, "Track contentHint unsupported");
+                } else {
+                    logger.info(LOG_PREFIX, "Set video track contentHint to " + hint);
+                    track.contentHint = hint;
+                }
+            });
+        }
+        function addStreamTracks(pc, stream) {
+            stream.getTracks().forEach((track) => {
+                pc.addTrack(track, stream);
+            });
+        }
         connection.ontrack = function (event) {
             if (remoteVideo) {
                 remoteVideo.srcObject = event.streams[0];
                 remoteVideo.onloadedmetadata = function (e) {
                     if (remoteVideo) {
-                        var playPromise = remoteVideo.play();
-                        if (playPromise) {
-                          playPromise
-                            .then(
-                              () => {
-
-                              },
-                              () => {
+                        Promise.resolve(remoteVideo.play()).then(function() {
+                            // Automatically unmute video if needed #WCS-2425
+                            if (unmutePlayOnStart) {
+                                remoteVideo.muted = false;
+                            } else {
+                                // Fire UNMUTE_REQUIRED stream event #WCS-4097
+                                fireUnmuteEvent();
+                            }
+                        }).catch(function (e) {
+                            if (validBrowsers.includes(browserDetails.browser)) {
+                                //WCS-1698. fixed autoplay in chromium based browsers
+                                //WCS-2375. fixed autoplay in ios safari
+                                logger.info(LOG_PREFIX, "Autoplay detected! Trying to play a video with a muted sound...");
                                 remoteVideo.muted = true;
-
-                                var mutedPlayPromise = remoteVideo.play();
-                                if (mutedPlayPromise) {
-                                  mutedPlayPromise.catch(() => {
-                                    logger.info(LOG_PREFIX, "Video auto play is not working!");
-                                  });
-                                }
-                              })
-                            .catch(() => {
-                              remoteVideo.muted = true;
-                              remoteVideo.volume = 0;
-                              remoteVideo.controls = true; // todo
-                              remoteVideo.play();
-                              logger.info(LOG_PREFIX, "Autoplay detected! Trying to play a video with a muted sound...");
-                            });
-                        }
+                                remoteVideo.play();
+                                // Fire UNMUTE_REQUIRED stream event #WCS-4097
+                                fireUnmuteEvent();
+                            } else {
+                                logger.error(LOG_PREFIX, e);
+                            }
+                        });
                     }
                 };
             }
@@ -394,6 +424,7 @@ var createConnection = function (options) {
             }
             return true;
         };
+
         var muteVideo = function () {
             if (localVideo && localVideo.srcObject && localVideo.srcObject.getVideoTracks().length > 0) {
                 localVideo.srcObject.getVideoTracks()[0].enabled = false;
@@ -404,15 +435,17 @@ var createConnection = function (options) {
                 localVideo.srcObject.getVideoTracks()[0].enabled = true;
             }
         };
+        
         var isVideoMuted = function () {
             if (localVideo && localVideo.srcObject && localVideo.srcObject.getVideoTracks().length > 0) {
                 return !localVideo.srcObject.getVideoTracks()[0].enabled;
             }
             return true;
         };
+
         var getStat = function (callbackFn, nativeStats) {
-            var browser = browserDetails.browser;
-            var result = {outboundStream: {}, inboundStream: {}, otherStats: []};
+            let browser = browserDetails.browser;
+            let result = {outboundStream: {}, inboundStream: {}, otherStats: []};
             if (connection && validBrowsers.includes(browser)) {
                 if (nativeStats) {
                     return connection.getStats(null);
@@ -421,18 +454,18 @@ var createConnection = function (options) {
                         if (stat) {
                             stat.forEach(function (report) {
                                 if (!report.isRemote) {
+                                    let mediaType = "";
                                     if (report.type == 'outbound-rtp') {
-                                        fillStatObject(result.outboundStream, report);
-                                        if (report.mediaType == 'video') {
-                                            var vSettings = localVideo.srcObject.getVideoTracks()[0].getSettings();
-                                            result.outboundStream[report.mediaType].height = vSettings.height;
-                                            result.outboundStream[report.mediaType].width = vSettings.width;
+                                        mediaType = getReportMediaType(report);
+                                        fillStatObject(result.outboundStream, report, mediaType);
+                                        if (mediaType == 'video') {
+                                            getVideoSize(result.outboundStream[mediaType], report);
                                         }
                                     } else if (report.type == 'inbound-rtp') {
-                                        fillStatObject(result.inboundStream, report);
-                                        if (report.mediaType == 'video' && remoteVideo != undefined) {
-                                            result.inboundStream[report.mediaType].height = remoteVideo.videoHeight;
-                                            result.inboundStream[report.mediaType].width = remoteVideo.videoWidth;
+                                        mediaType = getReportMediaType(report);
+                                        fillStatObject(result.inboundStream, report, mediaType);
+                                        if (mediaType == 'video') {
+                                            getVideoSize(result.inboundStream[mediaType], report);
                                         }
                                     }
                                 }
@@ -445,20 +478,66 @@ var createConnection = function (options) {
             }
         };
 
-        function fillStatObject(obj, report) {
-            var mediaType = report.mediaType;
+        var getReportMediaType = function (report) {
+            // Since Safari 17 report.mediaType is undefined #WCS-3922
+            if (report.mediaType !== undefined) {
+                return report.mediaType;
+            } else if (report.kind !== undefined) {
+                return report.kind;
+            }
+            logger.warn(LOG_PREFIX, "No media type provided in WebRTC statistics");
+            return "media";
+        };
+
+        var getVideoSize = function (obj, report) {
+            let videoSize = {};
+            if (report.type == 'outbound-rtp') {
+                if (localVideo !== undefined && localVideo != null) {
+                    videoSize = localVideo.srcObject.getVideoTracks()[0].getSettings();
+                }
+            } else if (report.type == 'inbound-rtp') {
+                if (remoteVideo !== undefined && remoteVideo != null) {
+                    videoSize.width = remoteVideo.videoWidth;
+                    videoSize.height = remoteVideo.videoHeight;
+                }
+            }
+            if (report.frameWidth !== undefined) {
+                obj.width = report.frameWidth;
+            } else if (videoSize.width !== undefined) {
+                obj.width = videoSize.width;
+            }
+            if (report.frameHeight !== undefined) {
+                obj.height = report.frameHeight;
+            } else if (videoSize.height !== undefined) {
+                obj.height = videoSize.height;
+            }
+        };
+
+        var fillStatObject = function (obj, report, mediaType) {
             obj[mediaType] = {};
             //WCS-1922, currentRemoteDescription - browser compatibilitySection: Chrome 70, FF 57, Safari 11
-            var description = connection.currentRemoteDescription != undefined ? connection.currentRemoteDescription : connection.remoteDescription;
-            var codec = util.getCurrentCodecAndSampleRate(description.sdp, mediaType);
+            let description = connection.currentRemoteDescription != undefined ? connection.currentRemoteDescription : connection.remoteDescription;
+            // SDP may be null in Safari 12.1 and older, prevent TypeError here #WCS-3583
+            let sdp = "";
+            if (description && description.sdp) {
+               sdp = description.sdp;
+            } else {
+               logger.debug(LOG_PREFIX, "Can't parse current SDP to detect codec and sampleRate");
+            }
+            var codec = util.getCurrentCodecAndSampleRate(sdp, mediaType);
             obj[mediaType]["codec"] = codec.name;
             obj[mediaType]["codecRate"] = codec.sampleRate;
             Object.keys(report).forEach(function (key) {
-                if (key.startsWith("bytes") || key.startsWith("packets") || key.indexOf("Count") != -1) {
+                // Add audioLevel parameter parsing #WCS-3290
+                if (key.startsWith("bytes") ||
+                    key.startsWith("packets") ||
+                    key.indexOf("Count") != -1 ||
+                    key.indexOf("audioLevel") != -1 ||
+                    key == "framesPerSecond") {
                     obj[mediaType][key] = report[key];
                 }
             });
-        }
+        };
 
         var fullScreen = function () {
             var video = document.getElementById(id);
@@ -705,6 +784,27 @@ var createConnection = function (options) {
             screenShare = false;
         };
 
+        var setPublishingBitrate = function(minBitrate, maxBitrate) {
+            let senders = connection.getSenders();
+            senders.forEach((sender) => {
+                if (sender.track.kind == "video" && maxBitrate) {
+                    let parameters = sender.getParameters();
+                    for (let i = 0; i < parameters.encodings.length; i++) {
+                        if (!parameters.encodings[i].maxBitrate) {
+                            parameters.encodings[i].maxBitrate = maxBitrate * 1000;
+                        }
+                    }
+                    sender.setParameters(parameters).then(() => {});
+                }
+            });
+        };
+
+        var fireUnmuteEvent = function() {
+            if (unmuteRequiredEvent && typeof unmuteRequiredEvent === 'function') {
+                unmuteRequiredEvent();
+            }
+        };
+
         var exports = {};
         exports.state = state;
         exports.createOffer = createOffer;
@@ -731,6 +831,7 @@ var createConnection = function (options) {
         exports.switchMic = switchMic;
         exports.switchToScreen = switchToScreen;
         exports.switchToCam = switchToCam;
+        exports.setPublishingBitrate = setPublishingBitrate;
         connections[id] = exports;
         resolve(exports);
     });
@@ -851,10 +952,14 @@ var getMediaAccess = function (constraints, display, disableConstraintsNormaliza
                 // WCS-2933, fix mobile streaming issues, gather info about available devices before streaming, but not during
                 listDevices(false).then((devices) => {
                     devices.video.forEach(function (device) {
-                        videoCams.push(device.id);
+                        if (!videoCams.find((cam) => device.id === cam.id)) {
+                            videoCams.push(device);
+                        }
                     })
                     devices.audio.forEach(function (device) {
-                        mics.push(device.id);
+                        if (!mics.find((mic) => device.id === mic.id)) {
+                            mics.push(device);
+                        }
                     })
                     navigator.getUserMedia(constraints, function (stream) {
                         loadVideo(display, stream, screenShare, requestAudioConstraints, resolve, constraints, useCanvas);
@@ -1082,6 +1187,7 @@ var createGainNode = function (stream) {
     source.connect(gainNode);
     gainNode.connect(destination);
     var sourceAudioTrack = stream.getAudioTracks()[0];
+    audioSourceDevice = sourceAudioTrack.label;
     gainNode.sourceAudioTrack = sourceAudioTrack;
     gainNode.release = function () {
         this.sourceAudioTrack.stop();
@@ -1091,6 +1197,10 @@ var createGainNode = function (stream) {
     stream.removeTrack(sourceAudioTrack);
     return gainNode;
 };
+
+const getAudioSourceDevice = function () {
+    return audioSourceDevice;
+}
 
 //Fix to set screen resolution for screen sharing in Firefox
 var setScreenResolution = function (video, stream, constraints) {
@@ -1208,6 +1318,36 @@ function getCacheInstance(display) {
     }
 }
 
+function getVideoElement(display) {
+    if (display) {
+        for (const child of display.children) {
+            if (child.tagName.toLowerCase() === "video") {
+                return child;
+            } else {
+                let grandchild = getVideoElement(child);
+                if (grandchild) {
+                    return grandchild;
+                }
+            }
+        }
+    }
+    return null;
+}
+
+function createVideoElement(useControls = false) {
+    let video = document.createElement('video');
+    // Prepare video tag to auto play and add specific Safari tweaks #WCS-2425
+    video.muted = true;
+    if (util.Browser.isSafariWebRTC()) {
+        video.setAttribute("playsinline", "");
+        video.setAttribute("webkit-playsinline", "");
+    }
+    if (useControls) {
+        enableVideoControls(video);
+    }
+    return(video);
+}
+
 function removeVideoElement(video) {
     if (video.srcObject) {
         //pause
@@ -1313,8 +1453,8 @@ var listDevices = function (labels, kind, deviceConstraints) {
                     return;
                 }
                 navigator.getUserMedia(constraints, function (stream) {
-                    navigator.mediaDevices.enumerateDevices().then(function (devicesWithLabales) {
-                        resolve(getList(devicesWithLabales));
+                    navigator.mediaDevices.enumerateDevices().then(function (devicesWithLabels) {
+                        resolve(getList(devicesWithLabels));
                         stream.getTracks().forEach(function (track) {
                             track.stop();
                         });
@@ -1451,5 +1591,10 @@ module.exports = {
         logger = configuration.logger;
         createMicGainNode = (typeof configuration.createMicGainNode !== 'undefined') ? configuration.createMicGainNode : true;
         logger.info(LOG_PREFIX, "Initialized");
-    }
+    },
+    videoCams: videoCams,
+    mics: mics,
+    getAudioSourceDevice: getAudioSourceDevice,
+    getCacheInstance: getCacheInstance,
+    getVideoElement: getVideoElement
 };

@@ -164,7 +164,12 @@ var Browser = {
     }
 };
 
-// Generate simple uuid
+/**
+ * Generate simple uuid
+ *
+ * @param length UUID length
+ * @returns {string}
+ */
 function createUUID(length) {
     var s = [];
     var hexDigits = "0123456789abcdef";
@@ -232,4 +237,228 @@ function downScaleToFitSize(videoWidth, videoHeight, dstWidth, dstHeight) {
         w: newWidth,
         h: newHeight
     };
+}
+
+/**
+ * Set Webkit fullscreen handler functions to video tag
+ *
+ * @param video
+ */
+function setWebkitFullscreenHandlers(video, startFullScreen = true) {
+    if (video) {
+        let needRestart = false;
+        let wasFullscreen = false;
+        // iOS hack when using standard controls to leave fullscreen mode
+        video.addEventListener("pause", function () {
+            if (needRestart) {
+                console.log("Video paused after fullscreen, continue...");
+                wasFullscreen = true;
+                video.play();
+                needRestart = false;
+            }
+        });
+        video.addEventListener("webkitendfullscreen", function () {
+            wasFullscreen = true;
+            video.play();
+            needRestart = true;
+        });
+        if (startFullScreen) {
+            // Start playback in fullscreen if webkit-playsinline is set
+            video.addEventListener("playing", function () {
+                // Do not enter fullscreen again if we just left it #WCS-3860
+                if (canWebkitFullScreen(video) && !wasFullscreen) {
+                    // We should catch if fullscreen mode is not available
+                    try {
+                        video.webkitEnterFullscreen();
+                    } catch (e) {
+                        console.log("Fullscreen is not allowed: " + e);
+                    }
+                }
+                wasFullscreen = false;
+            });
+        }
+    } else {
+        console.log("No video tag is passed, skip webkit fullscreen handlers setup");
+    }
+}
+
+/**
+ * Check if fullscreen mode is available in Webkit
+ *
+ * @param video
+ * @returns {boolean}
+ */
+function canWebkitFullScreen(video) {
+    let canFullscreen = false;
+    if (video) {
+        canFullscreen = video.webkitSupportsFullscreen && !video.webkitDisplayingFullscreen;
+    }
+    return canFullscreen;
+}
+
+/**
+ * Helper function to set item text
+ *
+ * @param id
+ * @param text
+ */
+const setText = function (id, text) {
+    let item = document.getElementById(id);
+    if (item) {
+        item.innerHTML = text;
+    }
+}
+
+/**
+ * Helper function to set an item value
+ *
+ * @param id
+ * @param value
+ */
+const setValue = function (id, value) {
+    let item = document.getElementById(id);
+    if (item) {
+        item.value = value;
+    }
+}
+
+/**
+ * Helper function to get an item value
+ *
+ * @param id
+ * @returns value
+ */
+const getValue = function (id) {
+    let item = document.getElementById(id);
+    if (item) {
+        return item.value;
+    }
+    return null;
+}
+
+/**
+ * Helper function to set/unset a checkbox
+ *
+ * @param id
+ * @param value
+ */
+const setCheckbox = function (id, value) {
+    let item = document.getElementById(id);
+    if (item) {
+        item.checked = value;
+    }
+}
+
+/**
+ * Helper function to get a checkbox state
+ *
+ * @param id
+ * @returns value
+ */
+const getCheckbox = function (id) {
+    let item = document.getElementById(id);
+    if (item) {
+        return item.checked;
+    }
+    return null;
+}
+
+
+/**
+ * Helper function to display an item
+ *
+ * @param id
+ */
+const showItem = function(id) {
+    let item = document.getElementById(id);
+    if (item) {
+        item.style.display = "block";
+    }
+}
+
+/**
+ * Helper function to hide an item
+ *
+ * @param id
+ */
+const hideItem = function(id) {
+    let item = document.getElementById(id);
+    if (item) {
+        item.style.display = "none";
+    }
+}
+
+/**
+ * Helper function to disable an item
+ *
+ * @param id
+ */
+const disableItem = function(id) {
+    let item = document.getElementById(id);
+    if (item) {
+        item.disabled = true;
+    }
+}
+
+/**
+ * Helper function to enable an item
+ *
+ * @param id
+ */
+const enableItem = function(id) {
+    let item = document.getElementById(id);
+    if (item) {
+        item.disabled = false;
+    }
+}
+
+/**
+ * Set an event handler
+ *
+ * @param id
+ * @param event
+ * @param handler
+ * @param previous
+ */
+const setHandler = function (id, event, handler, previous = null) {
+    let item = document.getElementById(id);
+    if (item) {
+        if (previous) {
+            item.removeEventListener(event, previous)
+        }
+        item.addEventListener(event, handler);
+    }
+}
+
+/**
+ * Find a closest item
+ *
+ * @param id
+ * @param selector
+ * @returns {null}
+ */
+const closest = function (id, selector) {
+    let currentElement = document.getElementById(id);
+    let returnElement = null;
+
+    while (currentElement && currentElement.parentNode && !returnElement) {
+        currentElement = currentElement.parentNode;
+        returnElement = currentElement.querySelector(selector);
+    }
+
+    return returnElement;
+}
+
+/**
+ * Display object properties fro debugging purposes
+ *
+ * @param object
+ */
+const showProps = function (object) {
+    console.log("-------------------------------object begin");
+    for (const property in object) {
+        console.log(`${property}: ${object[property]}`);
+    }
+    console.log("-------------------------------object end");
+
 }
