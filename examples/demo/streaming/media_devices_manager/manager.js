@@ -139,6 +139,12 @@ function init_page() {
         $("#notifyFlash").text("Failed to get media devices");
     });
 
+    if (Browser.isiOS() && Browser.isSafariWebRTC()) {
+        document.addEventListener('visibilitychange', () => {
+            onVisibilityChanged();
+        });
+    }
+
     $("#urlServer").val(setURL());
     var streamName = createUUID(4);
     $("#publishStream").val(streamName);
@@ -223,6 +229,7 @@ function onPublishing(stream) {
     }).prop('disabled', false);
     $("#switchBtn").text("Switch").off('click').click(function () {
         stream.switchCam().then(function(id) {
+            console.log("Switched by button to camera " + id);
             $('#videoInput option:selected').prop('selected', false);
             $("#videoInput option[value='"+ id +"']").prop('selected', true);
         }).catch(function(e) {
@@ -280,6 +287,21 @@ function onDisconnected() {
     $('#urlServer').prop('disabled', false);
     onUnpublished();
     onStopped();
+}
+
+function onVisibilityChanged() {
+    if (Browser.isiOS() && Browser.isSafariWebRTC() && document.hidden !== undefined) {
+        // iOS Safari may change camera when rising from the background, use chosen one explicitly
+        if (publishStream && !document.hidden) {
+            publishStream.switchCam($('#videoInput').val()).then(function(id) {
+                console.log("Switched explicitly to camera " + id);
+                $('#videoInput option:selected').prop('selected', false);
+                $("#videoInput option[value='"+ id +"']").prop('selected', true);
+            }).catch(function(e) {
+                console.log("Error " + e);
+            });
+        }
+    }
 }
 
 function connect() {
@@ -412,6 +434,7 @@ function publish() {
         cvoExtension: cvo,
         stripCodecs: strippedCodecs
     }).on(STREAM_STATUS.PUBLISHING, function (stream) {
+        publishConnectionQualityStat.connectionQualityUpdateTimestamp = new Date().valueOf();
         $("#testBtn").prop('disabled', true);
         var video = document.getElementById(stream.id());
         //resize local if resolution is available
@@ -815,33 +838,39 @@ function readyControls() {
 function loadStats() {
     if (publishStream) {
         publishStream.getStats(function (stats) {
-            if (stats && stats.outboundStream) {
-                if (stats.outboundStream.video) {
-                    showStat(stats.outboundStream.video, "outVideoStat");
-                    let vBitrate = (stats.outboundStream.video.bytesSent - videoBytesSent) * 8;
-                    if ($('#outVideoStatBitrate').length == 0) {
-                        let html = "<div>Bitrate: " + "<span id='outVideoStatBitrate' style='font-weight: normal'>" + vBitrate + "</span>" + "</div>";
-                        $("#outVideoStat").append(html);
-                    } else {
-                        $('#outVideoStatBitrate').text(vBitrate);
-                    }
-                    videoBytesSent = stats.outboundStream.video.bytesSent;
+            if (stats) {
+                if (stats.outboundStream) {
+                    if (stats.outboundStream.video) {
+                        showStat(stats.outboundStream.video, "outVideoStat");
+                        let vBitrate = (stats.outboundStream.video.bytesSent - videoBytesSent) * 8;
+                        if ($('#outVideoStatBitrate').length == 0) {
+                            let html = "<div>Bitrate: " + "<span id='outVideoStatBitrate' style='font-weight: normal'>" + vBitrate + "</span>" + "</div>";
+                            $("#outVideoStat").append(html);
+                        } else {
+                            $('#outVideoStatBitrate').text(vBitrate);
+                        }
+                        videoBytesSent = stats.outboundStream.video.bytesSent;
 
-                    if(new Date().valueOf() - CONNECTION_QUALITY_UPDATE_TIMEOUT_MS > publishConnectionQualityStat.connectionQualityUpdateTimestamp) {
-                        publishConnectionQualityStat.quality = CONNECTION_QUALITY.UNKNOWN;
+                        if(new Date().valueOf() - CONNECTION_QUALITY_UPDATE_TIMEOUT_MS > publishConnectionQualityStat.connectionQualityUpdateTimestamp) {
+                            publishConnectionQualityStat.quality = CONNECTION_QUALITY.UNKNOWN;
+                        }
                     }
+
+                    if (stats.outboundStream.audio) {
+                        showStat(stats.outboundStream.audio, "outAudioStat");
+                        let aBitrate = (stats.outboundStream.audio.bytesSent - audioBytesSent) * 8;
+                        if ($('#outAudioStatBitrate').length == 0) {
+                            let html = "<div>Bitrate: " + "<span id='outAudioStatBitrate' style='font-weight: normal'>" + aBitrate + "</span>" + "</div>";
+                            $("#outAudioStat").append(html);
+                        } else {
+                            $('#outAudioStatBitrate').text(aBitrate);
+                        }
+                        audioBytesSent = stats.outboundStream.audio.bytesSent;
+                    }
+
                 }
-
-                if (stats.outboundStream.audio) {
-                    showStat(stats.outboundStream.audio, "outAudioStat");
-                    let aBitrate = (stats.outboundStream.audio.bytesSent - audioBytesSent) * 8;
-                    if ($('#outAudioStatBitrate').length == 0) {
-                        let html = "<div>Bitrate: " + "<span id='outAudioStatBitrate' style='font-weight: normal'>" + aBitrate + "</span>" + "</div>";
-                        $("#outAudioStat").append(html);
-                    } else {
-                        $('#outAudioStatBitrate').text(aBitrate);
-                    }
-                    audioBytesSent = stats.outboundStream.audio.bytesSent;
+                if (stats.otherStats) {
+                    showStat(stats.otherStats, "outConnectionStat");
                 }
             }
             if (publishConnectionQualityStat.quality !== undefined) {
@@ -851,58 +880,62 @@ function loadStats() {
     }
     if (previewStream) {
         previewStream.getStats(function (stats) {
-            if (stats && stats.inboundStream) {
-                if (stats.inboundStream.video) {
-                    showStat(stats.inboundStream.video, "inVideoStat");
-                    let vBitrate = (stats.inboundStream.video.bytesReceived - videoBytesReceived) * 8;
-                    if ($('#inVideoStatBitrate').length == 0) {
-                        let html = "<div>Bitrate: " + "<span id='inVideoStatBitrate' style='font-weight: normal'>" + vBitrate + "</span>" + "</div>";
-                        $("#inVideoStat").append(html);
-                    } else {
-                        $('#inVideoStatBitrate').text(vBitrate);
-                    }
-                    videoBytesReceived = stats.inboundStream.video.bytesReceived;
+            if (stats) {
+                if (stats.inboundStream) {
+                    if (stats.inboundStream.video) {
+                        showStat(stats.inboundStream.video, "inVideoStat");
+                        let vBitrate = (stats.inboundStream.video.bytesReceived - videoBytesReceived) * 8;
+                        if ($('#inVideoStatBitrate').length == 0) {
+                            let html = "<div>Bitrate: " + "<span id='inVideoStatBitrate' style='font-weight: normal'>" + vBitrate + "</span>" + "</div>";
+                            $("#inVideoStat").append(html);
+                        } else {
+                            $('#inVideoStatBitrate').text(vBitrate);
+                        }
+                        videoBytesReceived = stats.inboundStream.video.bytesReceived;
 
-                    if(new Date().valueOf() - CONNECTION_QUALITY_UPDATE_TIMEOUT_MS > playConnectionQualityStat.connectionQualityUpdateTimestamp) {
-                        playConnectionQualityStat.quality = CONNECTION_QUALITY.UNKNOWN;
+                        if (new Date().valueOf() - CONNECTION_QUALITY_UPDATE_TIMEOUT_MS > playConnectionQualityStat.connectionQualityUpdateTimestamp) {
+                            playConnectionQualityStat.quality = CONNECTION_QUALITY.UNKNOWN;
+                        }
                     }
-                }
 
-                if (stats.inboundStream.audio) {
-                    showStat(stats.inboundStream.audio, "inAudioStat");
-                    let aBitrate = (stats.inboundStream.audio.bytesReceived - audioBytesReceived) * 8;
-                    if ($('#inAudioStatBitrate').length == 0) {
-                        let html = "<div style='font-weight: bold'>Bitrate: " + "<span id='inAudioStatBitrate' style='font-weight: normal'>" + aBitrate + "</span>" + "</div>";
-                        $("#inAudioStat").append(html);
-                    } else {
-                        $('#inAudioStatBitrate').text(aBitrate);
+                    if (stats.inboundStream.audio) {
+                        if (stats.inboundStream.audio.audioLevel) {
+                            // Round audio level to 6 decimal places
+                            stats.inboundStream.audio.audioLevel = stats.inboundStream.audio.audioLevel.toFixed(6);
+                        }
+                        showStat(stats.inboundStream.audio, "inAudioStat");
+                        let aBitrate = (stats.inboundStream.audio.bytesReceived - audioBytesReceived) * 8;
+                        if ($('#inAudioStatBitrate').length == 0) {
+                            let html = "<div style='font-weight: bold'>Bitrate: " + "<span id='inAudioStatBitrate' style='font-weight: normal'>" + aBitrate + "</span>" + "</div>";
+                            $("#inAudioStat").append(html);
+                        } else {
+                            $('#inAudioStatBitrate').text(aBitrate);
+                        }
+                        audioBytesReceived = stats.inboundStream.audio.bytesReceived;
                     }
-                    audioBytesReceived = stats.inboundStream.audio.bytesReceived;
                 }
-                if (playConnectionQualityStat.quality !== undefined) {
-                    showStat({"quality": playConnectionQualityStat.quality}, "inConnectionStat");
+                if (stats.otherStats) {
+                    showStat(stats.otherStats, "inConnectionStat");
                 }
+            }
+            if (playConnectionQualityStat.quality !== undefined) {
+                showStat({"quality": playConnectionQualityStat.quality}, "inConnectionStat");
             }
         });
     }
-    function showStat(stat, type) {
-        Object.keys(stat).forEach(function(key) {
-            if (typeof stat[key] !== 'object') {
-                let k = key.split(/(?=[A-Z])/);
-                let metric = "";
-                for (let i = 0; i < k.length; i++) {
-                    metric += k[i][0].toUpperCase() + k[i].substring(1) + " ";
-                }
-                if ($("#" + key + "-" + type).length == 0) {
-                    let html = "<div style='font-weight: bold'>" + metric.trim() + ": <span id='" + key  + "-" + type + "' style='font-weight: normal'></span>" + "</div>";
-                    // $(html).insertAfter("#" + type);
-                    $("#" + type).append(html);
-                } else {
-                    $("#" + key + "-" + type).text(stat[key]);
-                }
+}
+
+// Helper function to display stats
+function showStat(stat, type) {
+    Object.keys(stat).forEach(function(key) {
+        if (typeof stat[key] !== 'object') {
+            let k = key.split(/(?=[A-Z])/);
+            let metric = "";
+            for (let i = 0; i < k.length; i++) {
+                metric += k[i][0].toUpperCase() + k[i].substring(1) + " ";
             }
-        });
-    }
+        }
+    });
 }
 
 //Test

@@ -48,7 +48,7 @@ var createConnection = function (options) {
         var localVideo;
         //tweak for custom video players #WCS-1511
         var remoteVideo = options.remoteVideo;
-        var switchCamCount = 0;
+        var switchCamIndex = 0;
         var switchMicCount = 0;
         var customStream = options.customStream;
         var currentAudioTrack;
@@ -141,10 +141,10 @@ var createConnection = function (options) {
             var videoTrack = localVideo.srcObject.getVideoTracks()[0];
             if (videoTrack) {
                 videoCams.forEach((cam, index) => {
-                    if (videoTrack.label === cam.label) {
-                        switchCamCount = index;
-                    }
-                 });
+                   if (videoTrack.label === cam.label) {
+                       switchCamIndex = index;
+                   }
+                });
             }
             var audioTrack = localVideo.srcObject.getAudioTracks()[0];
             if (audioTrack) {
@@ -469,17 +469,24 @@ var createConnection = function (options) {
                             stat.forEach(function (report) {
                                 if (!report.isRemote) {
                                     let mediaType = "";
-                                    if (report.type == 'outbound-rtp') {
+                                    if (report.type === 'outbound-rtp') {
                                         mediaType = getReportMediaType(report);
                                         fillStatObject(result.outboundStream, report, mediaType);
-                                        if (mediaType == 'video') {
+                                        if (mediaType === 'video') {
                                             getVideoSize(result.outboundStream[mediaType], report);
                                         }
-                                    } else if (report.type == 'inbound-rtp') {
+                                    } else if (report.type === 'inbound-rtp') {
                                         mediaType = getReportMediaType(report);
                                         fillStatObject(result.inboundStream, report, mediaType);
-                                        if (mediaType == 'video') {
+                                        if (mediaType === 'video') {
                                             getVideoSize(result.inboundStream[mediaType], report);
+                                        }
+                                    } else if (report.type === 'candidate-pair' && report.state === 'succeeded' && report.nominated) {
+                                        if (report.availableIncomingBitrate) {
+                                            result.otherStats.availableIncomingBitrate = report.availableIncomingBitrate;
+                                        } else if (localVideo && report.availableOutgoingBitrate) {
+                                            // availableOutgoingBitrate is defined for incoming stream too #WCS-4175
+                                            result.otherStats.availableOutgoingBitrate = report.availableOutgoingBitrate;
                                         }
                                     }
                                 }
@@ -538,19 +545,27 @@ var createConnection = function (options) {
             } else {
                logger.debug(LOG_PREFIX, "Can't parse current SDP to detect codec and sampleRate");
             }
-            var codec = util.getCurrentCodecAndSampleRate(sdp, mediaType);
+            let codec = util.getCurrentCodecAndSampleRate(sdp, mediaType);
             obj[mediaType]["codec"] = codec.name;
             obj[mediaType]["codecRate"] = codec.sampleRate;
+            let qualityLimitationDurations;
             Object.keys(report).forEach(function (key) {
                 // Add audioLevel parameter parsing #WCS-3290
                 if (key.startsWith("bytes") ||
                     key.startsWith("packets") ||
                     key.indexOf("Count") != -1 ||
                     key.indexOf("audioLevel") != -1 ||
-                    key == "framesPerSecond") {
+                    key === "framesPerSecond" ||
+                    key === "qualityLimitationReason" ) {
                     obj[mediaType][key] = report[key];
                 }
+                if (key === "qualityLimitationDurations") {
+                    qualityLimitationDurations = report[key];
+                }
             });
+            if (qualityLimitationDurations) {
+                obj[mediaType]["qualityLimitationDurations"] = qualityLimitationDurations[obj[mediaType]["qualityLimitationReason"]];
+            }
         };
 
         var fullScreen = function () {
@@ -606,12 +621,26 @@ var createConnection = function (options) {
                 if (localVideo && localVideo.srcObject && videoCams.length > 1 && !customStream && !screenShare) {
                     connection.getSenders().forEach(function (sender) {
                         if (sender.track.kind === 'audio') return;
-                        switchCamCount = (switchCamCount + 1) % videoCams.length;
                         sender.track.stop();
-                        var cam = (typeof deviceId !== "undefined") ? deviceId : videoCams[switchCamCount].id;
+                        var cameraId;
+                        if (typeof deviceId !== "undefined") {
+                            videoCams.forEach((cam, index) => {
+                                if (deviceId === cam.id) {
+                                    switchCamIndex = index;
+                                }
+                            });
+                            cameraId = deviceId;
+                        } else {
+                            switchCamIndex = (switchCamIndex + 1) % videoCams.length;
+                            cameraId = videoCams[switchCamIndex].id;
+                        }
+                        if (!cameraId) {
+                            logger.error(LOG_PREFIX, "Can't detect camera to switch to");
+                            reject(constants.ERROR_INFO.CAN_NOT_SWITCH_CAM);
+                        }
                         //use the settings that were set during connection initiation
                         var clonedConstraints = Object.assign({}, constraints);
-                        clonedConstraints.video.deviceId = {exact: cam};
+                        clonedConstraints.video.deviceId = {exact: cameraId};
                         clonedConstraints.audio = false;
                         navigator.mediaDevices.getUserMedia(clonedConstraints).then(function (newStream) {
                             var newVideoTrack = newStream.getVideoTracks()[0];
@@ -623,8 +652,8 @@ var createConnection = function (options) {
                             if (localVideo.srcObject.getAudioTracks().length == 0 && audioTrack) {
                                 localVideo.srcObject.addTrack(audioTrack);
                             }
-                            logger.info(LOG_PREFIX, "Switch camera to " + cam);
-                            resolve(cam);
+                            logger.info(LOG_PREFIX, "Switch camera to " + cameraId);
+                            resolve(cameraId);
                         }).catch(function (reason) {
                             logger.error(LOG_PREFIX, reason);
                             reject(reason);
