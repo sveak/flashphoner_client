@@ -2897,6 +2897,7 @@ var createSession = function (options) {
         if (!localVideo && mediaProvider.getVideoElement) {
             localVideo = mediaProvider.getVideoElement(display);
         }
+        // PR #19 from GitHub to prevent Sentry issue #WCS-4239
         if (localVideo && localVideo.srcObject) {
             localVideo.srcObject.getAudioTracks().forEach((track) => {
                 let device = track.label;
